@@ -35,13 +35,10 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
-      - name: Reconstruct and unpack Android project
+      - name: Reconstruct and patch Android project
         run: |
-          echo 'Chunk sizes:'
-          wc -c .apkbuild/chunk00a .apkbuild/chunk00b .apkbuild/part00 .apkbuild/part01 .apkbuild/part02 .apkbuild/part03 .apkbuild/part04
           cat .apkbuild/chunk00a .apkbuild/chunk00b .apkbuild/part00 .apkbuild/part01 .apkbuild/part02 .apkbuild/part03 .apkbuild/part04 > furniture-crm-android.raw.b64
           tr -cd 'A-Za-z0-9+/=' < furniture-crm-android.raw.b64 > furniture-crm-android.b64
-          echo "Clean base64 chars: $(wc -c < furniture-crm-android.b64) (expected 52276)"
           test "$(wc -c < furniture-crm-android.b64)" -eq 52276
           echo '475ec12e165b7b6f6239f5a43c10eb42d5fbf9fb0a193b9cfe51c699c59617ce  furniture-crm-android.b64' | sha256sum -c -
           base64 --decode furniture-crm-android.b64 > furniture-crm-android-rebuilt.zip
@@ -50,12 +47,16 @@ jobs:
           rm -rf build-src
           mkdir build-src
           unzip -q furniture-crm-android-rebuilt.zip -d build-src
-          sed -i 's/compileSdk = 37/compileSdk = 36/' build-src/FurnitureInstallerCRM-Android/app/build.gradle.kts
-          sed -i 's/targetSdk = 37/targetSdk = 36/' build-src/FurnitureInstallerCRM-Android/app/build.gradle.kts
+          APP=build-src/FurnitureInstallerCRM-Android/app
+          sed -i 's/compileSdk = 37/compileSdk = 36/' "$APP/build.gradle.kts"
+          sed -i 's/targetSdk = 37/targetSdk = 36/' "$APP/build.gradle.kts"
+          sed -i 's/compose-bom:2026.08.00/compose-bom:2025.06.01/' "$APP/build.gradle.kts"
+          sed -i '1i@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)\n' "$APP/src/main/java/ru/furniturecrm/app/CrmApp.kt"
+          echo 'Patched SDK, Compose BOM and Material3 opt-in.'
 
       - name: Build debug APK
         working-directory: build-src/FurnitureInstallerCRM-Android
-        run: gradle --no-daemon assembleDebug
+        run: gradle --no-daemon assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -63,5 +64,3 @@ jobs:
           name: FurnitureInstallerCRM-APK
           path: build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
-# final rebuild trigger
