@@ -38,8 +38,8 @@ jobs:
       - name: Reconstruct and unpack Android project
         run: |
           echo 'Chunk sizes:'
-          wc -c .apkbuild/chunk00 .apkbuild/part00 .apkbuild/part01 .apkbuild/part02 .apkbuild/part03 .apkbuild/part04
-          cat .apkbuild/chunk00 .apkbuild/part00 .apkbuild/part01 .apkbuild/part02 .apkbuild/part03 .apkbuild/part04 > furniture-crm-android.raw.b64
+          wc -c .apkbuild/chunk00a .apkbuild/chunk00b .apkbuild/part00 .apkbuild/part01 .apkbuild/part02 .apkbuild/part03 .apkbuild/part04
+          cat .apkbuild/chunk00a .apkbuild/chunk00b .apkbuild/part00 .apkbuild/part01 .apkbuild/part02 .apkbuild/part03 .apkbuild/part04 > furniture-crm-android.raw.b64
           tr -cd 'A-Za-z0-9+/=' < furniture-crm-android.raw.b64 > furniture-crm-android.b64
           echo "Clean base64 chars: $(wc -c < furniture-crm-android.b64) (expected 52276)"
           test "$(wc -c < furniture-crm-android.b64)" -eq 52276
