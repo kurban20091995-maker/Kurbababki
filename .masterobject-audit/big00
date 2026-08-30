@@ -1,0 +1,183 @@
+ данные")}; Spacer(Modifier.height(8.dp)); OutlinedButton(onClick={importLauncher.launch(arrayOf("application/json","text/plain"))},modifier=Modifier.fillMaxWidth()){Text("Восстановить из копии")} }
+-        item { Text("Экспорт включает объекты, оплаты, расходы, чек-листы и настройки. Перед импортом текущая база заменяется содержимым копии.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
++        item { Text("JSON-копия включает объекты, оплаты, расходы, чек-листы, настройки и ссылки на вложения. Сами файлы фотографий хранятся локально в приложении и не встраиваются в JSON.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+         if(state.projects.isEmpty()) item { OutlinedButton(onClick=vm::seedDemo,modifier=Modifier.fillMaxWidth()){Text("Добавить 4 демонстрационных объекта")} }
+         item { Text("Мастер Объект • Android • локальная база SQLite",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+     }
+@@ -434,7 +434,10 @@
+             Button(onClick={
+                 val parsedDate=if(date.isBlank())null else runCatching{LocalDate.parse(date.trim())}.getOrNull()
+                 val days=duration.replace(',','.').toDoubleOrNull()
+-                when { title.isBlank()||client.isBlank()->error="Заполни название и клиента"; date.isNotBlank()&&parsedDate==null->error="Дата должна быть в формате ГГГГ-ММ-ДД"; days==null||days<=0->error="Укажи длительность объекта"; else->{ error=null; onSave(Project(id=existing?.id?:0,title=title,clientName=client,phone=phone,address=address,furnitureType=type,customType=custom,basePriceCents=parseRubles(price),plannedStart=parsedDate,startTime=time.ifBlank{"09:00"},durationHalfDays=(days*2).toInt().coerceAtLeast(1),status=status,notes=notes,queuePosition=existing?.queuePosition?:0,actualStart=existing?.actualStart,actualFinish=existing?.actualFinish)) } }
++                val normalizedTime = time.ifBlank { "09:00" }
++                val validTime = runCatching { java.time.LocalTime.parse(normalizedTime) }.isSuccess
++                val halfDays = days?.times(2)?.let { kotlin.math.round(it).toInt() }
++                when { title.isBlank()||client.isBlank()->error="Заполни название и клиента"; date.isNotBlank()&&parsedDate==null->error="Дата должна быть в формате ГГГГ-ММ-ДД"; !validTime->error="Время должно быть в формате ЧЧ:ММ"; days==null||days<=0->error="Укажи длительность объекта"; kotlin.math.abs(days*2 - (halfDays ?: 0)) > 0.001->error="Длительность указывается шагом 0,5 дня"; else->{ error=null; onSave(Project(id=existing?.id?:0,title=title,clientName=client,phone=phone,address=address,furnitureType=type,customType=custom,basePriceCents=parseRubles(price),plannedStart=parsedDate,startTime=normalizedTime,durationHalfDays=(halfDays ?: 1).coerceAtLeast(1),status=status,notes=notes,queuePosition=existing?.queuePosition?:0,actualStart=existing?.actualStart,actualStartHalf=existing?.actualStartHalf,actualFinish=existing?.actualFinish)) } }
+             },modifier=Modifier.fillMaxWidth()){Text("Сохранить объект")}
+             Spacer(Modifier.height(24.dp))
+         }
+@@ -588,5 +591,10 @@
+     if (address.isNotBlank()) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=${Uri.encode(address)}"))) }
+ }
+ 
+-private fun parseRubles(s:String):Long { val clean=s.replace(" ","").replace(',','.'); return ((clean.toDoubleOrNull()?:0.0)*100).toLong().coerceAtLeast(0) }
++private fun parseRubles(s:String):Long {
++    val clean=s.replace(" ","").replace(',','.')
++    return runCatching {
++        java.math.BigDecimal(clean).setScale(2, java.math.RoundingMode.HALF_UP).movePointRight(2).longValueExact().coerceAtLeast(0)
++    }.getOrDefault(0L)
++}
+ private fun displayName(context:android.content.Context,uri:Uri):String { return context.contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use{if(it.moveToFirst())it.getString(0) else null} ?: "Файл" }
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Database.kt FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Database.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Database.kt	2026-08-30 19:43:54.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Database.kt	2026-08-30 20:55:54.087960087 +0000
+@@ -4,11 +4,15 @@
+ import android.database.sqlite.SQLiteDatabase
+ import android.database.sqlite.SQLiteOpenHelper
+ 
+-class CrmDatabase(context: Context) : SQLiteOpenHelper(context, "furniture_crm.db", null, 2) {
++class CrmDatabase(context: Context) : SQLiteOpenHelper(context, "furniture_crm.db", null, 3) {
++    init {
++        setWriteAheadLoggingEnabled(true)
++    }
++
+     override fun onConfigure(db: SQLiteDatabase) {
+         super.onConfigure(db)
+         db.setForeignKeyConstraintsEnabled(true)
+-        db.enableWriteAheadLogging()
++        db.rawQuery("PRAGMA busy_timeout=5000", null).close()
+     }
+ 
+     override fun onCreate(db: SQLiteDatabase) {
+@@ -29,19 +33,19 @@
+               notes TEXT NOT NULL DEFAULT '',
+               queue_position INTEGER NOT NULL DEFAULT 0,
+               actual_start TEXT,
++              actual_start_half INTEGER,
+               actual_finish TEXT,
+               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+             )
+         """.trimIndent())
+-        db.execSQL("CREATE INDEX idx_projects_status_queue ON projects(status, queue_position)")
+-        db.execSQL("CREATE INDEX idx_projects_phone ON projects(phone)")
+         db.execSQL("""CREATE TABLE extras(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, name TEXT NOT NULL, price_cents INTEGER NOT NULL DEFAULT 0, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE)""")
+         db.execSQL("""CREATE TABLE payments(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, amount_cents INTEGER NOT NULL, date TEXT NOT NULL, method TEXT NOT NULL, comment TEXT NOT NULL DEFAULT '', FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE)""")
+         db.execSQL("""CREATE TABLE expenses(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, amount_cents INTEGER NOT NULL, date TEXT NOT NULL, category TEXT NOT NULL, comment TEXT NOT NULL DEFAULT '', FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE)""")
+         db.execSQL("""CREATE TABLE checklist(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, text TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE)""")
+         db.execSQL("""CREATE TABLE attachments(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, uri TEXT NOT NULL, name TEXT NOT NULL, mime_type TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE)""")
+         db.execSQL("CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
++        createIndexes(db)
+         db.execSQL("INSERT INTO settings(key,value) VALUES('work_days','1,2,3,4,5,6')")
+         db.execSQL("INSERT INTO settings(key,value) VALUES('reminder_days','7,3,1,0')")
+     }
+@@ -52,5 +56,21 @@
+             db.execSQL("ALTER TABLE attachments ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
+             db.execSQL("UPDATE attachments SET created_at = CURRENT_TIMESTAMP WHERE created_at = ''")
+         }
++        if (oldVersion < 3) {
++            db.execSQL("ALTER TABLE projects ADD COLUMN actual_start_half INTEGER")
++            createIndexes(db)
++        }
++    }
++
++    private fun createIndexes(db: SQLiteDatabase) {
++        db.execSQL("CREATE INDEX IF NOT EXISTS idx_projects_status_queue ON projects(status, queue_position)")
++        db.execSQL("CREATE INDEX IF NOT EXISTS idx_projects_phone ON projects(phone)")
++        db.execSQL("CREATE INDEX IF NOT EXISTS idx_projects_planned_start ON projects(planned_start)")
++        db.execSQL("CREATE INDEX IF NOT EXISTS idx_extras_project ON extras(project_id)")
++        db.execSQL("CREATE INDEX IF NOT EXISTS idx_payments_project_date ON payments(project_id, date)")
++        db.execSQL("CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(date)")
++        db.execSQL("CREATE INDEX IF NOT EXISTS idx_expenses_project_date ON expenses(project_id, date)")
++        db.execSQL("CREATE INDEX IF NOT EXISTS idx_checklist_project ON checklist(project_id)")
++        db.execSQL("CREATE INDEX IF NOT EXISTS idx_attachments_project ON attachments(project_id)")
+     }
+ }
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Models.kt FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Models.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Models.kt	2026-08-30 19:43:54.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Models.kt	2026-08-30 20:58:16.771360582 +0000
+@@ -33,6 +33,7 @@
+     val notes: String = "",
+     val queuePosition: Int = 0,
+     val actualStart: LocalDate? = null,
++    val actualStartHalf: Int? = null,
+     val actualFinish: LocalDate? = null,
+ )
+ 
+@@ -114,6 +115,13 @@
+     val reminderDays: Set<Int> = setOf(7, 3, 1, 0),
+ )
+ 
+-fun Long.asRubles(): String = "%,d ₽".format(this / 100).replace(',', ' ')
+-fun Double.toHalfDays(): Int = (this * 2.0).toInt().coerceAtLeast(1)
++fun Long.asRubles(): String {
++    val negative = this < 0
++    val value = if (negative) -this else this
++    val major = "%,d".format(value / 100).replace(',', ' ')
++    val minor = (value % 100).toString().padStart(2, '0')
++    val amount = if (minor == "00") major else "$major,$minor"
++    return (if (negative) "-" else "") + amount + " ₽"
++}
++fun Double.toHalfDays(): Int = kotlin.math.round(this * 2.0).toInt().coerceAtLeast(1)
+ fun Int.halfDaysLabel(): String = if (this % 2 == 0) "${this / 2} дн." else if (this == 1) "0,5 дня" else "${this / 2},5 дн."
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Notifications.kt FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Notifications.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Notifications.kt	2026-08-30 18:07:58.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Notifications.kt	2026-08-30 20:58:50.999293367 +0000
+@@ -12,37 +12,54 @@
+ import android.os.Build
+ import androidx.core.app.NotificationCompat
+ import androidx.core.content.ContextCompat
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.launch
+ import java.time.Duration
+ import java.time.LocalDate
+ import java.time.ZonedDateTime
+ 
+ object ReminderScheduler {
+     private const val REQUEST = 7001
++
+     fun schedule(context: Context) {
+         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+         val intent = Intent(context, ReminderReceiver::class.java)
+         val pi = PendingIntent.getBroadcast(context, REQUEST, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+-        var next = ZonedDateTime.now().withHour(8).withMinute(0).withSecond(0).withNano(0)
+-        if (!next.isAfter(ZonedDateTime.now())) next = next.plusDays(1)
++        val now = ZonedDateTime.now()
++        var next = now.withHour(8).withMinute(0).withSecond(0).withNano(0)
++        if (!next.isAfter(now)) next = next.plusDays(1)
+         alarm.setInexactRepeating(AlarmManager.RTC_WAKEUP, next.toInstant().toEpochMilli(), AlarmManager.INTERVAL_DAY, pi)
+     }
+ }
+ 
+ class BootReceiver : BroadcastReceiver() {
+-    override fun onReceive(context: Context, intent: Intent?) { ReminderScheduler.schedule(context) }
++    override fun onReceive(context: Context, intent: Intent?) {
++        ReminderScheduler.schedule(context.applicationContext)
++    }
+ }
+ 
+ class ReminderReceiver : BroadcastReceiver() {
+     override fun onReceive(context: Context, intent: Intent?) {
+-        val repo = CrmRepository(context)
+-        val settings = repo.getSettings()
+-        val projects = repo.listProjects()
+-        val schedule = Scheduler.calculate(projects.map { it.project }, settings.workDays)
+-        val today = LocalDate.now()
+-        createChannel(context)
+-        schedule.items.forEach { item ->
+-            val days = Duration.between(today.atStartOfDay(), item.startDate.atStartOfDay()).toDays().toInt()
+-            if (days in settings.reminderDays) notify(context, item, days)
++        val pending = goAsync()
++        val appContext = context.applicationContext
++        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
++            try {
++                val repo = CrmRepository(appContext)
++                val settings = repo.getSettings()
++                val projects = repo.listProjects()
++                // Reminder runs around 08:00, so morning is the intended scheduling cursor.
++                val schedule = Scheduler.calculate(projects.map { it.project }, settings.workDays, LocalDate.now(), 0)
++                val today = LocalDate.now()
++                createChannel(appContext)
++                schedule.items.forEac
