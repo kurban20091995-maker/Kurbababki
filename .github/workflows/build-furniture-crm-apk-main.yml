@@ -36,7 +36,9 @@ jobs:
 
       - name: Reconstruct Master Object project
         run: |
-          cat .masterobject-v2/part00 .masterobject-v2/part01 .masterobject-v2/part02 .masterobject-v2/part03 .masterobject-v2/part04 .masterobject-v2/part05 .masterobject-v2/part06 .masterobject-v2/part07 > masterobject.b64
+          cat .masterobject-v2/part00 .masterobject-v2/part01 .masterobject-v2/part02 .masterobject-v2/part03 .masterobject-v2/part04 .masterobject-v2/part05 .masterobject-v2/part06 .masterobject-v2/part07 > masterobject.raw.b64
+          tr -cd 'A-Za-z0-9+/=' < masterobject.raw.b64 > masterobject.b64
+          echo "Clean Base64 size: $(wc -c < masterobject.b64)"
           test "$(wc -c < masterobject.b64)" -eq 61464
           echo 'eca53c315198510a55ead79176b996711096a2d7ba9d083c53a3faa773f2ddc8  masterobject.b64' | sha256sum -c -
           base64 --decode masterobject.b64 > MasterObject-Android.zip
