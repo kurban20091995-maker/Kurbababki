@@ -37,8 +37,15 @@ jobs:
 
       - name: Reconstruct and unpack Android project
         run: |
-          cat .apkbuild/chunk00 .apkbuild/part00 .apkbuild/part01 .apkbuild/part02 .apkbuild/part03 .apkbuild/part04 > furniture-crm-android.b64
+          echo 'Chunk sizes:'
+          wc -c .apkbuild/chunk00 .apkbuild/part00 .apkbuild/part01 .apkbuild/part02 .apkbuild/part03 .apkbuild/part04
+          cat .apkbuild/chunk00 .apkbuild/part00 .apkbuild/part01 .apkbuild/part02 .apkbuild/part03 .apkbuild/part04 > furniture-crm-android.raw.b64
+          tr -cd 'A-Za-z0-9+/=' < furniture-crm-android.raw.b64 > furniture-crm-android.b64
+          echo "Clean base64 chars: $(wc -c < furniture-crm-android.b64) (expected 52276)"
+          test "$(wc -c < furniture-crm-android.b64)" -eq 52276
+          echo '475ec12e165b7b6f6239f5a43c10eb42d5fbf9fb0a193b9cfe51c699c59617ce  furniture-crm-android.b64' | sha256sum -c -
           base64 --decode furniture-crm-android.b64 > furniture-crm-android-rebuilt.zip
+          echo 'e34540d11955faf82549a750e7ed950c081a5175a6195db0c2c38bbf94931898  furniture-crm-android-rebuilt.zip' | sha256sum -c -
           unzip -t furniture-crm-android-rebuilt.zip
           rm -rf build-src
           mkdir build-src
