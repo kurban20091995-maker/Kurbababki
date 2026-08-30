@@ -1,0 +1,186 @@
+g slot for the live app. After the work day ends we start planning from
+-     * the next configured work day instead of pretending that today is still free.
+-     */
+     fun currentStart(
+         workDays: Set<DayOfWeek>,
+-        today: LocalDate = LocalDate.now(),
+-        now: LocalTime = LocalTime.now(),
++        today: LocalDate = BusinessTime.today(),
++        now: LocalTime = BusinessTime.time(),
+     ): Pair<LocalDate, Int> {
+         if (workDays.isNotEmpty() && today.dayOfWeek !in workDays) {
+             return nextWorkDay(today, workDays) to 0
+@@ -30,96 +31,122 @@
+         }
+     }
+ 
++    /**
++     * Builds one deterministic schedule from the current business slot.
++     *
++     * Rules:
++     * 1) an object already IN_PROGRESS owns the first available slots;
++     * 2) every explicit plannedStart is a reservation and is protected from flexible jobs;
++     * 3) objects without a date are placed by queuePosition into the earliest contiguous gap;
++     * 4) disabled work days never consume a slot;
++     * 5) no calculated start can be earlier than [from]/[fromHalf].
++     */
+     fun calculate(
+         projects: List<Project>,
+         workDays: Set<DayOfWeek>,
+-        from: LocalDate = LocalDate.now(),
++        from: LocalDate = BusinessTime.today(),
+         fromHalf: Int = 0,
+     ): ScheduleResult {
+         val initial = normalizedStartSlot(from, fromHalf, workDays)
++        val active = projects.filter { it.status !in setOf(ProjectStatus.COMPLETED, ProjectStatus.CANCELLED) }
++        if (active.isEmpty()) return ScheduleResult(emptyList(), initial.date, initial.half, 0, emptyList())
++
++        val occupied = linkedSetOf<Slot>()
++        val scheduled = mutableListOf<ScheduledProject>()
++        var totalRemainingHalfDays = 0
++
++        fun scheduleProject(project: Project, start: Slot, duration: Int, originalRequestedDate: LocalDate? = null) {
++            val slots = slotsFor(start, duration, workDays)
++            occupied += slots
++            totalRemainingHalfDays += duration
++            val end = slots.last()
++            val delay = originalRequestedDate?.let { requested ->
++                ChronoUnit.DAYS.between(requested, start.date).coerceAtLeast(0)
++            } ?: 0L
++            scheduled += ScheduledProject(
++                projectId = project.id,
++                title = project.title,
++                furnitureType = project.furnitureType,
++                startDate = start.date,
++                startHalf = start.half,
++                endDate = end.date,
++                endHalf = end.half,
++                delayedFromFixedDateByDays = delay,
++            )
++        }
+ 
+-        val active = projects
+-            .asSequence()
+-            .filter { it.status !in setOf(ProjectStatus.COMPLETED, ProjectStatus.CANCELLED) }
+-            .map { p ->
+-                if (p.status == ProjectStatus.IN_PROGRESS && p.actualStart != null) {
+-                    val elapsedHalfDays = countElapsedBefore(
+-                        start = Slot(p.actualStart, p.actualStartHalf ?: startHalfFromTime(p.startTime)),
+-                        cursor = initial,
+-                        workDays = workDays,
+-                    )
+-                    p.copy(durationHalfDays = (p.durationHalfDays - elapsedHalfDays).coerceAtLeast(1))
+-                } else p
++        // Work already started has priority over every future reservation.
++        active.filter { it.status == ProjectStatus.IN_PROGRESS }
++            .sortedWith(compareBy<Project> { it.queuePosition }.thenBy { it.id })
++            .forEach { p ->
++                val remaining = remainingDuration(p, initial, workDays)
++                val start = findFirstFreeContiguous(initial, remaining, occupied, workDays)
++                scheduleProject(p, start, remaining)
+             }
++
++        // Explicit dates are hard reservations. Resolve conflicts only against other reservations/in-progress.
++        active.filter { it.status != ProjectStatus.IN_PROGRESS && it.plannedStart != null }
+             .sortedWith(
+-                compareBy<Project> { if (it.status == ProjectStatus.IN_PROGRESS) 0 else 1 }
++                compareBy<Project> { requestedStartSlot(it, workDays)?.date ?: LocalDate.MAX }
++                    .thenBy { requestedStartSlot(it, workDays)?.half ?: 0 }
+                     .thenBy { it.queuePosition }
+                     .thenBy { it.id }
+             )
+-            .toList()
+-
+-        if (active.isEmpty()) {
+-            return ScheduleResult(emptyList(), initial.date, initial.half, 0, emptyList())
+-        }
+-
+-        var cursor = initial
+-        val items = ArrayList<ScheduledProject>(active.size)
+-        val gaps = mutableListOf<FreeWindow>()
+-        var total = 0
+-
+-        active.forEach { p ->
+-            val requested = requestedStartSlot(p, workDays)
+-            val effectiveRequested = if (p.status == ProjectStatus.IN_PROGRESS) initial else requested
+-
+-            if (effectiveRequested != null && compareSlots(effectiveRequested, cursor) > 0) {
+-                val gapEnd = previousSlot(effectiveRequested, workDays)
+-                if (compareSlots(cursor, gapEnd) <= 0) {
+-                    gaps += FreeWindow(cursor.date, cursor.half, gapEnd.date, gapEnd.half)
+-                }
+-                cursor = effectiveRequested
++            .forEach { p ->
++                val requested = requestedStartSlot(p, workDays) ?: initial
++                val earliest = maxSlot(requested, initial)
++                val duration = p.durationHalfDays.coerceAtLeast(1)
++                val start = findFirstFreeContiguous(earliest, duration, occupied, workDays)
++                scheduleProject(p, start, duration, p.plannedStart)
+             }
+ 
+-            val start = cursor
+-            val delayed = if (requested != null && compareSlots(start, requested) > 0) {
+-                ChronoUnit.DAYS.between(requested.date, start.date).coerceAtLeast(0)
+-            } else 0
+-
+-            var remaining = p.durationHalfDays.coerceAtLeast(1)
+-            var end = cursor
+-            while (remaining > 0) {
+-                end = cursor
+-                remaining--
+-                total++
+-                if (remaining > 0) cursor = nextSlot(cursor, workDays)
++        // Queue-only jobs fill real gaps without moving confirmed dates.
++        active.filter { it.status != ProjectStatus.IN_PROGRESS && it.plannedStart == null }
++            .sortedWith(compareBy<Project> { it.queuePosition }.thenBy { it.id })
++            .forEach { p ->
++                val duration = p.durationHalfDays.coerceAtLeast(1)
++                val start = findFirstFreeContiguous(initial, duration, occupied, workDays)
++                scheduleProject(p, start, duration)
+             }
+-            cursor = nextSlot(end, workDays)
+-
+-            items += ScheduledProject(
+-                projectId = p.id,
+-                title = p.title,
+-                furnitureType = p.furnitureType,
+-                startDate = start.date,
+-                startHalf = start.half,
+-                endDate = end.date,
+-                endHalf = end.half,
+-                delayedFromFixedDateByDays = delayed,
+-            )
+-        }
+ 
+-        return ScheduleResult(items, cursor.date, cursor.half, total, gaps)
++        val ordered = scheduled.sortedWith(
++            compareBy<ScheduledProject> { it.startDate }.thenBy { it.startHalf }.thenBy { it.projectId }
++        )
++        val latest = occupied.maxOrNull()
++        val nextFree = latest?.let { nextSlot(it, workDays) } ?: initial
++        val gaps = if (latest == null) emptyList() else collectGaps(initial, latest, occupied, workDays)
++        return ScheduleResult(ordered, nextFree.date, nextFree.half, totalRemainingHalfDays, gaps)
+     }
+ 
+-    /** Earliest place where a new job actually fits, including a free window before a fixed job. */
++    /** Earliest contiguous place where a new prospective object really fits. */
+     fun estimateNewJob(
+         result: ScheduleResult,
+         durationHalfDays: Int,
+         workDays: Set<DayOfWeek>,
+-    ): Pair<LocalDate, LocalDate> {
++        notBeforeDate: LocalDate = currentStart(workDays).first,
++        notBeforeHalf: Int = currentStart(workDays).second,
++    ): JobEstimate {
+         val duration = durationHalfDays.coerceAtLeast(1)
+-        val gap = result.gaps.firstOrNull { gapCapacity(it, workDays) >= duration }
+-        val start = gap?.let { Slot(it.startDate, it.startHalf) } ?: Slot(result.nextFreeDate, result.nextFreeHalf)
+-        val end = advanceForDuration(start, duration, workDays)
+-        return start.date to end.date
++        val notBefore = normalizedStartSlot(notBeforeDate, notBeforeHalf, workDays)
++        val occupied = linkedSetOf<Slot>()
++        result.items.forEach { item ->
++            var slot = Slot(item.startDate, item.startHalf)
++            val end = Slot(item.endDate, item.endHalf)
++            var guard = 0
++            while (slot <= end &
