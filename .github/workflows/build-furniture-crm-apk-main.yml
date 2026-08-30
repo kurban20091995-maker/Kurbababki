@@ -26,10 +26,9 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android 37 SDK
+      - name: Install Android 36 SDK
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
 
       - name: Setup Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
@@ -41,6 +40,8 @@ jobs:
           rm -rf build-src
           mkdir build-src
           unzip -q furniture-crm-android.zip -d build-src
+          sed -i 's/compileSdk = 37/compileSdk = 36/' build-src/FurnitureInstallerCRM-Android/app/build.gradle.kts
+          sed -i 's/targetSdk = 37/targetSdk = 36/' build-src/FurnitureInstallerCRM-Android/app/build.gradle.kts
 
       - name: Build debug APK
         working-directory: build-src/FurnitureInstallerCRM-Android
