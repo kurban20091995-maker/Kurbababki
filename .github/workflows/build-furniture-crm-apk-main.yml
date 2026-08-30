@@ -63,3 +63,5 @@ jobs:
           name: FurnitureInstallerCRM-APK
           path: build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+# final rebuild trigger
