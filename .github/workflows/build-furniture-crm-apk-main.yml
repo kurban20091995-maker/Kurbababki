@@ -34,15 +34,31 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
-      - name: Reconstruct Master Object project
+      - name: Reconstruct verified Master Object project
         run: |
-          cat .masterobject-v2/part00 .masterobject-v2/part01 .masterobject-v2/part02 .masterobject-v2/part03 .masterobject-v2/part04 .masterobject-v2/part05 .masterobject-v2/part06 .masterobject-v2/part07 > masterobject.raw.b64
-          tr -cd 'A-Za-z0-9+/=' < masterobject.raw.b64 > masterobject.b64
-          echo "Clean Base64 size: $(wc -c < masterobject.b64)"
+          cat \
+            .masterobject-v2/part00 \
+            .masterobject-v2/part01 \
+            .masterobject-v2/part02 \
+            .masterobject-v2/part03a \
+            .masterobject-v3/part03b \
+            .masterobject-v2/part04 \
+            .masterobject-v2/part05 \
+            .masterobject-v3/part06a \
+            .masterobject-v3/part06b0 \
+            .masterobject-v3/part06b1 \
+            .masterobject-v3/part06b2 \
+            .masterobject-v3/part06b3 \
+            .masterobject-v3/part070 \
+            .masterobject-v3/part071 \
+            .masterobject-v3/part072 \
+            .masterobject-v3/part073 \
+            .masterobject-v3/part074 \
+            .masterobject-v3/part075 > masterobject.b64
           test "$(wc -c < masterobject.b64)" -eq 61464
-          echo 'eca53c315198510a55ead79176b996711096a2d7ba9d083c53a3faa773f2ddc8  masterobject.b64' | sha256sum -c -
+          echo '5481be78077523c8863519decdeac2bf342a943bef3f9404d0bffc9b2abf0ee4  masterobject.b64' | sha256sum -c -
           base64 --decode masterobject.b64 > MasterObject-Android.zip
-          echo '8a955e97ff63f2e804ff68c1a37eb19de99299b11c6fab1335a2dd4231c59ca6  MasterObject-Android.zip' | sha256sum -c -
+          echo '6a9a916cfcc886eaad66036d29a96bfc8128ed50b5b554c6cd256e0fc63fa298  MasterObject-Android.zip' | sha256sum -c -
           unzip -t MasterObject-Android.zip
           rm -rf build-src
           mkdir build-src
@@ -58,6 +74,12 @@ jobs:
 
       - name: Rename APK
         run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject.apk
+
+      - name: Verify APK
+        run: |
+          test -s MasterObject.apk
+          file MasterObject.apk
+          sha256sum MasterObject.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
