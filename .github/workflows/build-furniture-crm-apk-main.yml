@@ -64,6 +64,9 @@ jobs:
           mkdir build-src
           unzip -q MasterObject-Android.zip -d build-src
 
+      - name: Apply Master Object fixes
+        run: cp -a .masterobject-overlay/. build-src/FurnitureInstallerCRM-Android/
+
       - name: Run unit tests
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon testDebugUnitTest --stacktrace
