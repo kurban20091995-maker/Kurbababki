@@ -1,4 +1,4 @@
-name: Build Master Object APK
+name: Build Master Object Optimized APK
 
 on:
   push:
@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  audit-build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Android CRM branch
+      - name: Checkout audited source branch
         uses: actions/checkout@v4
         with:
           ref: furniture-crm-android-build
@@ -34,7 +34,7 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
-      - name: Reconstruct verified Master Object project
+      - name: Reconstruct verified Master Object base
         run: |
           cat \
             .masterobject-v2/part00 \
@@ -64,29 +64,57 @@ jobs:
           mkdir build-src
           unzip -q MasterObject-Android.zip -d build-src
 
-      - name: Apply Master Object fixes
-        run: cp -a .masterobject-overlay/. build-src/FurnitureInstallerCRM-Android/
+      - name: Reconstruct and verify full audit patch
+        run: |
+          cat \
+            .masterobject-audit/first0 \
+            .masterobject-audit/first1 \
+            .masterobject-audit/big00 \
+            .masterobject-audit/big01 \
+            .masterobject-audit/big02 \
+            .masterobject-audit/big03 > /tmp/masterobject-audit.patch
+          test "$(wc -c < /tmp/masterobject-audit.patch)" -eq 57527
+          echo '836117787d481196d93989f0f5df33821a947deb482b6f98ca00d0c60a96521d  /tmp/masterobject-audit.patch' | sha256sum -c -
+
+      - name: Apply audited fixes
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: patch -p1 < /tmp/masterobject-audit.patch
+
+      - name: Verify audited source configuration
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: |
+          grep -F 'applicationId = "ru.masterobject.crm"' app/build.gradle.kts
+          grep -F 'versionCode = 10' app/build.gradle.kts
+          grep -F 'versionName = "2.0.0"' app/build.gradle.kts
+          grep -F 'SQLiteOpenHelper(context, "furniture_crm.db", null, 3)' app/src/main/java/ru/furniturecrm/app/Database.kt
 
       - name: Run unit tests
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon testDebugUnitTest --stacktrace
 
-      - name: Build debug APK
+      - name: Run Android Lint
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: gradle --no-daemon lintDebug --stacktrace
+
+      - name: Build APK
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon assembleDebug --stacktrace
 
-      - name: Rename APK
-        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject.apk
+      - name: Prepare final APK
+        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject-Optimized.apk
 
-      - name: Verify APK
+      - name: Verify APK signature and identity
         run: |
-          test -s MasterObject.apk
-          file MasterObject.apk
-          sha256sum MasterObject.apk
+          test -s MasterObject-Optimized.apk
+          file MasterObject-Optimized.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs MasterObject-Optimized.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging MasterObject-Optimized.apk | tee /tmp/badging.txt
+          grep -F "package: name='ru.masterobject.crm' versionCode='10' versionName='2.0.0'" /tmp/badging.txt
+          sha256sum MasterObject-Optimized.apk
 
-      - name: Upload APK
+      - name: Upload verified APK
         uses: actions/upload-artifact@v4
         with:
-          name: MasterObject-APK
-          path: MasterObject.apk
+          name: MasterObject-Optimized-APK
+          path: MasterObject-Optimized.apk
           if-no-files-found: error
