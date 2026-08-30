@@ -1,0 +1,216 @@
+h { item ->
++                    val days = Duration.between(today.atStartOfDay(), item.startDate.atStartOfDay()).toDays().toInt()
++                    if (days in settings.reminderDays) notify(appContext, item, days)
++                }
++            } finally {
++                pending.finish()
++            }
+         }
+     }
+ 
+@@ -57,9 +74,14 @@
+ 
+     private fun notify(context: Context, item: ScheduledProject, days: Int) {
+         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+-        val open = PendingIntent.getActivity(context, item.projectId.toInt(), Intent(context, MainActivity::class.java).putExtra("projectId", item.projectId), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+-        val whenText = when(days) { 0 -> "Сегодня установка"; 1 -> "Завтра установка"; else -> "Через $days дн. установка" }
+-        val n = NotificationCompat.Builder(context, "installations")
++        val open = PendingIntent.getActivity(
++            context,
++            (item.projectId % Int.MAX_VALUE).toInt(),
++            Intent(context, MainActivity::class.java).putExtra("projectId", item.projectId),
++            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
++        )
++        val whenText = when (days) { 0 -> "Сегодня установка"; 1 -> "Завтра установка"; else -> "Через $days дн. установка" }
++        val notification = NotificationCompat.Builder(context, "installations")
+             .setSmallIcon(android.R.drawable.ic_popup_reminder)
+             .setContentTitle(whenText)
+             .setContentText(item.title)
+@@ -67,6 +89,7 @@
+             .setAutoCancel(true)
+             .setContentIntent(open)
+             .build()
+-        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify((item.projectId % Int.MAX_VALUE).toInt(), n)
++        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
++            .notify((item.projectId % Int.MAX_VALUE).toInt(), notification)
+     }
+ }
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoGallery.kt FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoGallery.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoGallery.kt	2026-08-30 19:44:50.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoGallery.kt	2026-08-30 20:56:59.896395275 +0000
+@@ -9,6 +9,8 @@
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.clickable
+ import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.lazy.LazyRow
++import androidx.compose.foundation.lazy.itemsIndexed
+ import androidx.compose.foundation.pager.HorizontalPager
+ import androidx.compose.foundation.pager.rememberPagerState
+ import androidx.compose.foundation.shape.RoundedCornerShape
+@@ -44,15 +46,17 @@
+     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
+ 
+     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+-        uris.forEach { uri ->
++        if (uris.isNotEmpty()) {
+             scope.launch {
+                 runCatching {
+                     withContext(Dispatchers.IO) {
+-                        val name = displayPhotoName(context, uri)
+-                        val mime = context.contentResolver.getType(uri)
+-                        PhotoStorage.copyIntoApp(context, uri, projectId, name, mime)
++                        uris.map { uri ->
++                            val name = displayPhotoName(context, uri)
++                            val mime = context.contentResolver.getType(uri)
++                            PhotoStorage.copyIntoApp(context, uri, projectId, name, mime)
++                        }
+                     }
+-                }.onSuccess { saved -> vm.addAttachment(projectId, saved.uri, saved.name, saved.mimeType) }
++                }.onSuccess { saved -> vm.addAttachments(projectId, saved) }
+             }
+         }
+     }
+@@ -105,18 +109,18 @@
+                     }
+                 }
+             } else {
+-                photos.chunked(3).forEachIndexed { rowIndex, row ->
+-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+-                        row.forEachIndexed { colIndex, photo ->
+-                            val index = rowIndex * 3 + colIndex
+-                            AsyncImage(
+-                                model = Uri.parse(photo.uri),
+-                                contentDescription = photo.name,
+-                                modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(16.dp)).clickable { viewerIndex = index },
+-                                contentScale = ContentScale.Crop
+-                            )
+-                        }
+-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
++                LazyRow(
++                    modifier = Modifier.fillMaxWidth(),
++                    horizontalArrangement = Arrangement.spacedBy(8.dp),
++                    contentPadding = PaddingValues(horizontal = 1.dp)
++                ) {
++                    itemsIndexed(photos, key = { _, photo -> photo.id }) { index, photo ->
++                        AsyncImage(
++                            model = Uri.parse(photo.uri),
++                            contentDescription = photo.name,
++                            modifier = Modifier.size(112.dp).clip(RoundedCornerShape(16.dp)).clickable { viewerIndex = index },
++                            contentScale = ContentScale.Crop
++                        )
+                     }
+                 }
+             }
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoStorage.kt FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoStorage.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoStorage.kt	2026-08-30 19:44:14.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoStorage.kt	2026-08-30 20:58:36.405578608 +0000
+@@ -18,11 +18,17 @@
+         val ext = extensionFrom(sourceName, mimeType)
+         val safeName = "photo_${timestamp()}_${UUID.randomUUID().toString().take(8)}.$ext"
+         val target = File(directory(context, projectId), safeName)
+-        context.contentResolver.openInputStream(source).use { input ->
+-            requireNotNull(input) { "Не удалось открыть выбранное фото" }
+-            target.outputStream().use { output -> input.copyTo(output) }
++        try {
++            context.contentResolver.openInputStream(source).use { input ->
++                requireNotNull(input) { "Не удалось открыть выбранное фото" }
++                target.outputStream().buffered().use { output -> input.copyTo(output, DEFAULT_BUFFER_SIZE) }
++            }
++            require(target.length() > 0L) { "Выбранное фото пустое" }
++            return SavedPhoto(Uri.fromFile(target).toString(), safeName, mimeType ?: mimeFromExtension(ext))
++        } catch (t: Throwable) {
++            target.delete()
++            throw t
+         }
+-        return SavedPhoto(Uri.fromFile(target).toString(), safeName, mimeType ?: mimeFromExtension(ext))
+     }
+ 
+     fun newCameraTarget(context: Context, projectId: Long): Pair<File, Uri> {
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Repository.kt FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Repository.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Repository.kt	2026-08-30 19:44:15.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Repository.kt	2026-08-30 20:58:28.716866091 +0000
+@@ -15,8 +15,8 @@
+ 
+     fun getSettings(): AppSettings {
+         val db = dbh.readableDatabase
+-        val work = setting(db, "work_days", "1,2,3,4,5,6").split(',').mapNotNull { it.toIntOrNull() }.map { DayOfWeek.of(it) }.toSet()
+-        val reminders = setting(db, "reminder_days", "7,3,1,0").split(',').mapNotNull { it.toIntOrNull() }.toSet()
++        val work = setting(db, "work_days", "1,2,3,4,5,6").split(',').mapNotNull { it.toIntOrNull()?.takeIf { n -> n in 1..7 } }.map { DayOfWeek.of(it) }.toSet()
++        val reminders = setting(db, "reminder_days", "7,3,1,0").split(',').mapNotNull { it.toIntOrNull()?.takeIf { n -> n in 0..30 } }.toSet()
+         return AppSettings(work.ifEmpty { AppSettings().workDays }, reminders.ifEmpty { setOf(7,3,1,0) })
+     }
+ 
+@@ -34,18 +34,29 @@
+     fun listProjects(): List<ProjectSummary> {
+         val sql = """
+             SELECT p.*,
+-              p.base_price_cents + COALESCE((SELECT SUM(price_cents) FROM extras e WHERE e.project_id=p.id),0) total_price,
+-              COALESCE((SELECT SUM(amount_cents) FROM payments x WHERE x.project_id=p.id),0) paid,
+-              COALESCE((SELECT SUM(amount_cents) FROM expenses x WHERE x.project_id=p.id),0) expenses_total,
+-              COALESCE((SELECT SUM(CASE WHEN a.mime_type LIKE 'image/%' OR lower(a.name) LIKE '%.jpg' OR lower(a.name) LIKE '%.jpeg' OR lower(a.name) LIKE '%.png' OR lower(a.name) LIKE '%.webp' OR lower(a.name) LIKE '%.heic' THEN 1 ELSE 0 END) FROM attachments a WHERE a.project_id=p.id),0) photo_count
++              p.base_price_cents + COALESCE(e.extra_total,0) total_price,
++              COALESCE(pay.paid_total,0) paid,
++              COALESCE(exp.expense_total,0) expenses_total,
++              COALESCE(att.photo_count,0) photo_count
+             FROM projects p
++            LEFT JOIN (SELECT project_id, SUM(price_cents) extra_total FROM extras GROUP BY project_id) e ON e.project_id=p.id
++            LEFT JOIN (SELECT project_id, SUM(amount_cents) paid_total FROM payments GROUP BY project_id) pay ON pay.project_id=p.id
++            LEFT JOIN (SELECT project_id, SUM(amount_cents) expense_total FROM expenses GROUP BY project_id) exp ON exp.project_id=p.id
++            LEFT JOIN (
++              SELECT project_id,
++                SUM(CASE WHEN mime_type LIKE 'image/%' OR lower(name) LIKE '%.jpg' OR lower(name) LIKE '%.jpeg' OR lower(name) LIKE '%.png' OR lower(name) LIKE '%.webp' OR lower(name) LIKE '%.heic' THEN 1 ELSE 0 END) photo_count
++              FROM attachments GROUP BY project_id
++            ) att ON att.project_id=p.id
+             ORDER BY CASE WHEN p.status='IN_PROGRESS' THEN 0 WHEN p.status IN ('COMPLETED','CANCELLED') THEN 2 ELSE 1 END,
+                      p.queue_position ASC, p.id DESC
+         """.trimIndent()
+         return dbh.readableDatabase.rawQuery(sql, null).use { c -> buildList { while (c.moveToNext()) add(c.toSummary()) } }
+     }
+ 
+-    fun getFinanceStats(): FinanceStats {
++    fun getFinanceStats(
++        summaries: List<ProjectSummary> = listProjects(),
++        settings: AppSettings = getSettings(),
++    ): FinanceStats {
+         val db = dbh.readableDatabase
+         val today = LocalDate.now()
+         val weekStart = today.minusDays((today.dayOfWeek.value - 1).toLong())
+@@ -57,12 +68,11 @@
+             return db.rawQuery(sql, args).use { it.moveToFirst(); it.getLong(0) }
+         }
+         val allExpenses = db.rawQuery("SELECT COALESCE(SUM(amount_cents),0) FROM expenses", null).use { it.moveToFirst(); it.getLong(0) }
+-        val summaries = listProjects()
+-        val debt = summaries.sumOf { it.debtCents }
++        val debt = summaries.filter { it.project.status != ProjectStatus.CANCELLED }.sumOf { it.debtCents }
+         val expected = summaries.filter { it.project.status !in setOf(ProjectStatus.COMPLETED, ProjectStatus.CANCELLED) }.sumOf { it.totalPriceCents }
+         val completed = summaries.count { it.project.status == ProjectStatus.COMPLETED }
+         val kitchens = summaries.count { it.project.status == ProjectStatus.COMPLETED && it.project.furnitureType == FurnitureType.KITCHEN }
+-        val workDays = getSettings().workDays
++        val workDays = settings.workDays
+         fun actualWorkDays(p: Project): Int? {
+             val start = p.actualStart ?: return null
+             val finish = p.actualFinish ?: return null
+@@ -133,6 +143,7 @@
+             put("notes", project.notes.trim())
+             put("queue_position", position)
+             if (project.actualStart == null) putNull("actual_start") else put("actual_start", project.actualStart.toString())
++            if (project.actualStartHalf == null) putNull("actual_start_half") else put("actual_start_half", project.actualStartHalf.coerceIn(0, 1))
+             if (project.actualFinish == null) putNull("actual_finish") else put("actual_finish", project.actualFinish.toString())
+             put("updated_at", java.time.LocalDateTime.now().toString())
+         }
+@@ -142,14 +153,19 @@
+     }
+ 
+     fun deleteProject(id: Long) {
+-        dbh.readableDatabase.rawQuery("SELECT uri FROM attachments WHERE project_id=?", arrayOf(id.toString())).use { c ->
+-            while (c.moveToNext()) PhotoStorage.deleteOwnedPhoto(c.getString(0))
++        val uris = dbh.readableDatabase.rawQuery("SELECT uri FROM attachments WHERE project_id=?", arrayOf(id.toString())).use { c ->
++            buildList { while (c.moveToNext()) add(c.getString(0)) }
+         }
+-        dbh.writableDatabase.delete("projects", "id=?", arrayOf(id.toString()))
++        val deleted = dbh.writableDatabase.delete("projects", "id=?", arrayOf(id.toString()))
++        if (deleted > 0) uris.forEach(PhotoStorage::deleteOwnedPhoto)
+     }
+ 
+     fun startProject(id: Long) {
+-        val cv = ContentValues().apply { put("status", ProjectStatus.IN_PROGRESS.name); put("actual_start", LocalDate.now().toString(
