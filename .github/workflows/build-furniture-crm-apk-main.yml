@@ -95,7 +95,7 @@ jobs:
 
       - name: Apply all date fixes
         working-directory: build-src/FurnitureInstallerCRM-Android
-        run: patch -p1 < /tmp/masterobject-dates.patch
+        run: patch -p2 < /tmp/masterobject-dates.patch
 
       - name: Verify final source configuration
         working-directory: build-src/FurnitureInstallerCRM-Android
