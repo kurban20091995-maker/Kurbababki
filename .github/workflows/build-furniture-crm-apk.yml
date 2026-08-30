@@ -3,6 +3,8 @@ name: Build Furniture CRM APK
 on:
   push:
     branches: [ furniture-crm-android-build ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
