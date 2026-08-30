@@ -1,0 +1,154 @@
+diff -ruN WorkflowAuditBase/FurnitureInstallerCRM-Android/app/build.gradle.kts MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/build.gradle.kts
+--- WorkflowAuditBase/FurnitureInstallerCRM-Android/app/build.gradle.kts	2026-08-30 21:29:11.783793470 +0000
++++ MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/build.gradle.kts	2026-08-30 21:28:36.868653006 +0000
+@@ -8,11 +8,11 @@
+     compileSdk = 36
+ 
+     defaultConfig {
+-        applicationId = "ru.masterobject.crm"
++        applicationId = "ru.masterobject.stable"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 10
+-        versionName = "2.0.0"
++        versionCode = 200
++        versionName = "2.2.0"
+ 
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+     }
+diff -ruN WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/BusinessTime.kt MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/BusinessTime.kt
+--- WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/BusinessTime.kt	1970-01-01 00:00:00.000000000 +0000
++++ MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/BusinessTime.kt	2026-08-30 21:26:01.567684712 +0000
+@@ -0,0 +1,37 @@
++package ru.furniturecrm.app
++
++import java.time.Instant
++import java.time.LocalDate
++import java.time.LocalDateTime
++import java.time.LocalTime
++import java.time.ZoneId
++import java.time.ZonedDateTime
++
++/**
++ * Single source of truth for all business dates in the CRM.
++ * The installer works in Moscow/Dagestan time (UTC+3), so calculations must not
++ * silently change when the phone, VPN or cloud environment uses another zone.
++ */
++object BusinessTime {
++    const val ZONE_ID = "Europe/Moscow"
++    val zoneId: ZoneId = ZoneId.of(ZONE_ID)
++
++    fun now(): ZonedDateTime = ZonedDateTime.now(zoneId)
++    fun today(): LocalDate = now().toLocalDate()
++    fun time(): LocalTime = now().toLocalTime()
++    fun localDateTime(): LocalDateTime = now().toLocalDateTime()
++
++    fun dateAt(instant: Instant): LocalDate = instant.atZone(zoneId).toLocalDate()
++    fun timeAt(instant: Instant): LocalTime = instant.atZone(zoneId).toLocalTime()
++
++    /** Changes only when the planning half-day or calendar date changes. */
++    fun planningKey(): String {
++        val now = now()
++        val half = when {
++            now.toLocalTime() >= LocalTime.of(19, 0) -> 2
++            now.toLocalTime() >= LocalTime.of(13, 0) -> 1
++            else -> 0
++        }
++        return "${now.toLocalDate()}-$half"
++    }
++}
+diff -ruN WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/CrmApp.kt MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/CrmApp.kt
+--- WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/CrmApp.kt	2026-08-30 21:29:11.784177627 +0000
++++ MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/CrmApp.kt	2026-08-30 21:27:03.343837393 +0000
+@@ -37,6 +37,7 @@
+ import androidx.compose.ui.text.style.TextOverflow
+ import androidx.compose.ui.unit.dp
+ import androidx.core.content.ContextCompat
++import kotlinx.coroutines.delay
+ import kotlinx.coroutines.launch
+ import java.time.DayOfWeek
+ import java.time.LocalDate
+@@ -69,6 +70,20 @@
+     }
+     LaunchedEffect(detailId) { detailId?.let(vm::selectProject) }
+ 
++    // Keep all date-dependent screens correct across midnight and half-day boundaries
++    // even when the app stays open for hours.
++    LaunchedEffect(Unit) {
++        var lastPlanningKey = BusinessTime.planningKey()
++        while (true) {
++            delay(30_000)
++            val nextKey = BusinessTime.planningKey()
++            if (nextKey != lastPlanningKey) {
++                lastPlanningKey = nextKey
++                vm.refresh()
++            }
++        }
++    }
++
+     val colors = lightColorScheme(
+         primary = Color(0xFF0E5A72),
+         onPrimary = Color.White,
+@@ -101,7 +116,7 @@
+                 detailId != null -> {
+                     val details = state.selected?.takeIf { it.summary.project.id == detailId }
+                     if (details == null) LoadingScreen(onBack = { detailId = null })
+-                    else ProjectDetailScreen(details, vm,
++                    else ProjectDetailScreen(details, state.schedule.items.firstOrNull { it.projectId == details.summary.project.id }, vm,
+                         onBack = { detailId = null; vm.clearSelected() },
+                         onEdit = { editId = details.summary.project.id },
+                         onDeleted = { detailId = null; vm.clearSelected() }
+@@ -114,7 +129,7 @@
+                     content = { current ->
+                         when (current) {
+                             MainScreen.HOME -> DashboardScreen(state, onProject = { detailId = it }, onAdd = { creating = true }, onQueue = { screenName = MainScreen.QUEUE.name })
+-                            MainScreen.PROJECTS -> ProjectsScreen(state.projects, onProject = { detailId = it }, onAdd = { creating = true })
++                            MainScreen.PROJECTS -> ProjectsScreen(state, onProject = { detailId = it }, onAdd = { creating = true })
+                             MainScreen.QUEUE -> QueueScreen(state, vm, onProject = { detailId = it })
+                             MainScreen.CALENDAR -> CalendarScreen(state, onProject = { detailId = it })
+                             MainScreen.FINANCE -> FinanceScreen(state.finance, state.projects, onProject = { detailId = it })
+@@ -166,20 +181,27 @@
+     val context = LocalContext.current
+     val active = state.projects.filter { it.project.status !in setOf(ProjectStatus.COMPLETED, ProjectStatus.CANCELLED) }
+     val kitchens = active.count { it.project.furnitureType == FurnitureType.KITCHEN }
+-    val today = LocalDate.now()
++    val today = BusinessTime.today()
+     val todayItems = state.schedule.items.filter { !today.isBefore(it.startDate) && !today.isAfter(it.endDate) }
+-    val next = state.schedule.items.firstOrNull { !it.startDate.isBefore(today) }
++    val liveStart = Scheduler.currentStart(state.settings.workDays)
++    val next = state.schedule.items.firstOrNull { Scheduler.itemIsCurrentOrFuture(it, liveStart.first, liveStart.second) }
+     val nextProject = next?.let { sc -> state.projects.firstOrNull { it.project.id == sc.projectId } }
+     var duration by rememberSaveable { mutableStateOf("3") }
+-    val estimate = remember(duration, state.schedule, state.settings) {
+-        val hd = ((duration.replace(',', '.').toDoubleOrNull() ?: 0.0) * 2).toInt().coerceAtLeast(1)
+-        Scheduler.estimateNewJob(state.schedule, hd, state.settings.workDays)
+-    }
++    val enteredDays = duration.replace(',', '.').toDoubleOrNull() ?: 0.0
++    val estimateHalfDays = Scheduler.daysToHalfDaysCeil(enteredDays)
++    val estimate = Scheduler.estimateNewJob(
++        result = state.schedule,
++        durationHalfDays = estimateHalfDays,
++        workDays = state.settings.workDays,
++        notBeforeDate = liveStart.first,
++        notBeforeHalf = liveStart.second,
++    )
+     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+         item {
+             Text("Добрый день", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+             Text("Мастер Объект", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+             Text("Объекты • Монтаж • Деньги", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
++            Text("Сегодня ${BusinessTime.today().format(RuFullDate)} • Москва (UTC+3)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+         }
+         item {
+             ElevatedCard(
+@@ -195,7 +217,7 @@
+                     } else {
+                         val p = nextProject.project
+                         Text(p.title, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+-                        Text("${p.clientName} • ${next.startDate.format(RuDate)} • ${p.startTime}", color = Color.White.copy(alpha=.92f))
++                        Text("${p.clientName} • ${next.startDate.format(RuDate)} • ${if (p.plannedStart != null) p.startTime else next.startHalf.slotLabel()}", color = Color.White.copy(alpha=.92f))
+                         if (p.address.isNotBlank()) Text(p.address, color = Color.White.copy(alpha=.78f), maxLines = 2)
+                         Text(nextProject.totalPriceCents.asRubles(), color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+@@ -234,7 +256,23 @@
+                
