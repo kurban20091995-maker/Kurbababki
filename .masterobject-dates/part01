@@ -1,0 +1,103 @@
+      Text("КОГДА Я СВОБОДЕН?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                     Text("Быстрый расчёт для нового клиента", color=MaterialTheme.colorScheme.onSurfaceVariant)
+                     OutlinedTextField(value = duration, onValueChange = { duration = it.filter { ch -> ch.isDigit() || ch == ',' || ch == '.' } }, label = { Text("Дней на новый объект") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+-                    Text("Можно начать ${estimate.first.format(RuDate)} • закончить ${estimate.second.format(RuDate)}", fontWeight = FontWeight.SemiBold, color=MaterialTheme.colorScheme.primary)
++                    if (enteredDays > 0.0) {
++                        Text(
++                            "Можно начать ${estimate.startDate.format(RuDate)} ${estimate.startHalf.slotLabel()} • " +
++                                "закончить ${estimate.endDate.format(RuDate)} ${estimate.endHalf.slotLabel()}",
++                            fontWeight = FontWeight.SemiBold,
++                            color = MaterialTheme.colorScheme.primary,
++                        )
++                    } else {
++                        Text("Укажи длительность нового объекта", color = MaterialTheme.colorScheme.onSurfaceVariant)
++                    }
++                    if (enteredDays > 0.0 && estimateHalfDays / 2.0 > enteredDays + 1e-9) {
++                        Text(
++                            "Для надёжного расчёта ${duration.replace('.', ',')} дн. округлено до ${estimateHalfDays.halfDaysLabel()}.",
++                            style = MaterialTheme.typography.bodySmall,
++                            color = MaterialTheme.colorScheme.onSurfaceVariant,
++                        )
++                    }
+                 }
+             }
+         }
+@@ -256,6 +294,8 @@
+     }
+ }
+ 
++private fun Int.slotLabel(): String = if (this == 0) "утром" else "после обеда"
++
+ @Composable private fun MetricCard(title: String, value: String, modifier: Modifier = Modifier) {
+     ElevatedCard(modifier, shape = RoundedCornerShape(18.dp)) { Column(Modifier.padding(14.dp)) { Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2) } }
+ }
+@@ -266,7 +306,9 @@
+ private fun freeText(s: ScheduleResult): String = if (s.nextFreeHalf == 0) "с ${s.nextFreeDate.format(RuDate)}" else "${s.nextFreeDate.format(RuDate)} после обеда"
+ 
+ @Composable
+-private fun ProjectsScreen(projects: List<ProjectSummary>, onProject: (Long) -> Unit, onAdd: () -> Unit) {
++private fun ProjectsScreen(state: AppUiState, onProject: (Long) -> Unit, onAdd: () -> Unit) {
++    val projects = state.projects
++    val scheduleById = state.schedule.items.associateBy { it.projectId }
+     var q by rememberSaveable { mutableStateOf("") }
+     var filter by rememberSaveable { mutableStateOf("Активные") }
+     val filtered = projects.filter { s ->
+@@ -292,7 +334,17 @@
+             }
+         }
+         if (filtered.isEmpty()) item { EmptyHint("По этому фильтру объектов нет") }
+-        items(filtered, key={it.project.id}) { p -> ProjectCard(p, { onProject(p.project.id) }) }
++        items(filtered, key={it.project.id}) { summary ->
++            val p = summary.project
++            val sc = scheduleById[p.id]
++            val subtitle = when {
++                sc != null -> "По графику: ${sc.startDate.format(RuDate)} ${sc.startHalf.slotLabel()} → ${sc.endDate.format(RuDate)} ${sc.endHalf.slotLabel()}"
++                p.status == ProjectStatus.COMPLETED && p.actualFinish != null -> "Завершён ${p.actualFinish.format(RuDate)}"
++                p.plannedStart != null -> "Назначено ${p.plannedStart.format(RuDate)} • ${p.startTime}"
++                else -> null
++            }
++            ProjectCard(summary, { onProject(p.id) }, subtitle)
++        }
+         item { OutlinedButton(onClick=onAdd, modifier=Modifier.fillMaxWidth()) { Text("＋ Новый объект") } }
+     }
+ }
+@@ -332,13 +384,13 @@
+     LazyColumn(contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+         item { Text("Очередь монтажей",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold); Text("Порядок объектов автоматически влияет на прогноз свободной даты", color=MaterialTheme.colorScheme.onSurfaceVariant) }
+         item { ImportantCard("${active.size} объектов • ${active.count{it.project.furnitureType==FurnitureType.KITCHEN}} кухни • ${state.schedule.totalHalfDays.halfDaysLabel()}", "Свободен ориентировочно ${freeText(state.schedule)}") }
+-        if (state.schedule.gaps.isNotEmpty()) item { ImportantCard("Свободное окно между заказами", state.schedule.gaps.first().let { "${it.startDate.format(RuDate)} — ${it.endDate.format(RuDate)}" }) }
++        if (state.schedule.gaps.isNotEmpty()) item { ImportantCard("Свободное окно между заказами", state.schedule.gaps.first().let { "${it.startDate.format(RuDate)} ${it.startHalf.slotLabel()} — ${it.endDate.format(RuDate)} ${it.endHalf.slotLabel()}" }) }
+         items(active, key={it.project.id}) { s ->
+             val sc=sched[s.project.id]
+             ElevatedCard(Modifier.fillMaxWidth().clickable{onProject(s.project.id)}) {
+                 Row(Modifier.padding(12.dp).fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                     Text("${s.project.queuePosition}",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold,modifier=Modifier.width(32.dp))
+-                    Column(Modifier.weight(1f)) { Text(s.project.title,fontWeight=FontWeight.Bold); Text(sc?.let{"${it.startDate.format(RuDate)} → ${it.endDate.format(RuDate)}"} ?: "ожидает расчёта"); if((sc?.delayedFromFixedDateByDays ?: 0L) > 0) Text("Сдвиг +${sc!!.delayedFromFixedDateByDays} дн.",color=MaterialTheme.colorScheme.error) }
++                    Column(Modifier.weight(1f)) { Text(s.project.title,fontWeight=FontWeight.Bold); Text(sc?.let{"${it.startDate.format(RuDate)} ${it.startHalf.slotLabel()} → ${it.endDate.format(RuDate)} ${it.endHalf.slotLabel()}"} ?: "ожидает расчёта"); if((sc?.delayedFromFixedDateByDays ?: 0L) > 0) Text("Сдвиг +${sc!!.delayedFromFixedDateByDays} дн.",color=MaterialTheme.colorScheme.error) }
+                     Column { TextButton(onClick={vm.moveProject(s.project.id,-1)}){Text("▲")}; TextButton(onClick={vm.moveProject(s.project.id,1)}){Text("▼")} }
+                 }
+             }
+@@ -349,7 +401,7 @@
+ @Composable
+ private fun CalendarScreen(state: AppUiState, onProject: (Long) -> Unit) {
+     var mode by rememberSaveable { mutableStateOf("Неделя") }
+-    var base by remember { mutableStateOf(LocalDate.now()) }
++    var base by remember { mutableStateOf(BusinessTime.today()) }
+     val range = when(mode) {
+         "День" -> base..base
+         "Месяц" -> { val ym=YearMonth.from(base); ym.atDay(1)..ym.atEndOfMonth() }
+@@ -363,7 +415,7 @@
+         if(visible.isEmpty()) item{EmptyHint("На выбранный период установок нет")}
+         items(visible,key={it.projectId}) { sc ->
+             val p=state.projects.firstOrNull{it.project.id==sc.projectId}
+-            if(p!=null) ProjectCard(p,{onProject(p.project.id)},"${sc.startDate.format(RuDate)} — ${sc.endDate.format(RuDate)}")
++            if(p!=null) ProjectCard(p,{onProject(p.project.id)},"${sc.startDate.format(RuDate)} ${sc.startHalf.slotLabel()} — ${sc.endDate.format(RuDate)} ${sc.endHalf.slotLabel()}")
+         }
+     }
+ }
+@@ -401,9 +453,10 @@
+         item { SectionTitle("Напоминания") }
+         item { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { listOf(7,3,1,0).forEach{n->FilterChip(selected=n in state.settings.reminderDays,onClick={val next=state.settings.reminderDays.toMutableSet();if(n in next)next.remove(n)else next.add(n);vm.setReminderDays(next)},label={Text(if(n==0)"В день" else "за $n дн.")})} } }
+         item { SectionTitle("Резервная копия") }
+-        item { Button(onClick={exportLauncher.launch("furniture-crm-backup-${LocalDate.now()}.json")},modifier=Modifier.fillMaxWidth()){Text("Экспортировать все данные")}; Spacer(Modifier.height(8.dp)); OutlinedButton(onClick={importLauncher.launch(arrayOf("application/json","text/plain"))},modifier=Modifier.fillMaxWidth()){Text("Восстановить из копии")} }
++        item { Button(onClick={exportLauncher.launch("master-obj
