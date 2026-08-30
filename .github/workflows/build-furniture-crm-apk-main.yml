@@ -1,4 +1,4 @@
-name: Build Furniture CRM APK
+name: Build Master Object APK
 
 on:
   push:
@@ -27,40 +27,39 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android 36 SDK
-        run: |
-          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
 
       - name: Setup Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
 
-      - name: Reconstruct and patch Android project
+      - name: Reconstruct Master Object project
         run: |
-          cat .apkbuild/chunk00a .apkbuild/chunk00b .apkbuild/part00 .apkbuild/part01 .apkbuild/part02 .apkbuild/part03 .apkbuild/part04 > furniture-crm-android.raw.b64
-          tr -cd 'A-Za-z0-9+/=' < furniture-crm-android.raw.b64 > furniture-crm-android.b64
-          test "$(wc -c < furniture-crm-android.b64)" -eq 52276
-          echo '475ec12e165b7b6f6239f5a43c10eb42d5fbf9fb0a193b9cfe51c699c59617ce  furniture-crm-android.b64' | sha256sum -c -
-          base64 --decode furniture-crm-android.b64 > furniture-crm-android-rebuilt.zip
-          echo 'e34540d11955faf82549a750e7ed950c081a5175a6195db0c2c38bbf94931898  furniture-crm-android-rebuilt.zip' | sha256sum -c -
-          unzip -t furniture-crm-android-rebuilt.zip
+          cat .masterobject-v2/part00 .masterobject-v2/part01 .masterobject-v2/part02 .masterobject-v2/part03 .masterobject-v2/part04 .masterobject-v2/part05 .masterobject-v2/part06 .masterobject-v2/part07 > masterobject.b64
+          test "$(wc -c < masterobject.b64)" -eq 61464
+          echo 'eca53c315198510a55ead79176b996711096a2d7ba9d083c53a3faa773f2ddc8  masterobject.b64' | sha256sum -c -
+          base64 --decode masterobject.b64 > MasterObject-Android.zip
+          echo '8a955e97ff63f2e804ff68c1a37eb19de99299b11c6fab1335a2dd4231c59ca6  MasterObject-Android.zip' | sha256sum -c -
+          unzip -t MasterObject-Android.zip
           rm -rf build-src
           mkdir build-src
-          unzip -q furniture-crm-android-rebuilt.zip -d build-src
-          APP=build-src/FurnitureInstallerCRM-Android/app
-          sed -i 's/compileSdk = 37/compileSdk = 36/' "$APP/build.gradle.kts"
-          sed -i 's/targetSdk = 37/targetSdk = 36/' "$APP/build.gradle.kts"
-          sed -i 's/compose-bom:2026.08.00/compose-bom:2025.06.01/' "$APP/build.gradle.kts"
-          sed -i '1i@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)\n' "$APP/src/main/java/ru/furniturecrm/app/CrmApp.kt"
-          echo 'Patched SDK, Compose BOM and Material3 opt-in.'
+          unzip -q MasterObject-Android.zip -d build-src
+
+      - name: Run unit tests
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: gradle --no-daemon testDebugUnitTest --stacktrace
 
       - name: Build debug APK
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon assembleDebug --stacktrace
 
+      - name: Rename APK
+        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FurnitureInstallerCRM-APK
-          path: build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk
+          name: MasterObject-APK
+          path: MasterObject.apk
           if-no-files-found: error
