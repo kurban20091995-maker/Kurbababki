@@ -1,0 +1,195 @@
+& guard++ < 20_000) {
++                occupied += slot
++                if (slot == end) break
++                slot = nextSlot(slot, workDays)
++            }
++        }
++        val start = findFirstFreeContiguous(notBefore, duration, occupied, workDays)
++        val end = slotsFor(start, duration, workDays).last()
++        return JobEstimate(start.date, start.half, end.date, end.half, duration)
++    }
++
++    fun daysToHalfDaysCeil(days: Double): Int {
++        if (!days.isFinite() || days <= 0.0) return 1
++        return kotlin.math.ceil(days * 2.0 - 1e-9).toInt().coerceAtLeast(1)
+     }
+ 
+     fun startHalfFromTime(value: String): Int {
+@@ -127,80 +154,105 @@
+         return if (time >= afternoonStartsAt) 1 else 0
+     }
+ 
+-    fun currentHalfForActualStart(now: LocalTime = LocalTime.now()): Int =
++    fun currentHalfForActualStart(now: LocalTime = BusinessTime.time()): Int =
+         if (now >= afternoonStartsAt) 1 else 0
+ 
+-    private fun normalizedStartSlot(from: LocalDate, fromHalf: Int, workDays: Set<DayOfWeek>): Slot {
+-        val d = nextWorkDay(from, workDays)
+-        return if (d == from) Slot(d, fromHalf.coerceIn(0, 1)) else Slot(d, 0)
++    fun itemIsCurrentOrFuture(item: ScheduledProject, date: LocalDate, half: Int): Boolean =
++        Slot(item.endDate, item.endHalf) >= Slot(date, half.coerceIn(0, 1))
++
++    private fun remainingDuration(project: Project, initial: Slot, workDays: Set<DayOfWeek>): Int {
++        val actualStart = project.actualStart ?: return project.durationHalfDays.coerceAtLeast(1)
++        val start = Slot(actualStart, project.actualStartHalf ?: startHalfFromTime(project.startTime))
++        val elapsed = countElapsedBefore(start, initial, workDays)
++        return (project.durationHalfDays - elapsed).coerceAtLeast(1)
+     }
+ 
+     private fun requestedStartSlot(project: Project, workDays: Set<DayOfWeek>): Slot? {
+-        val date = project.plannedStart ?: return null
+-        val normalized = nextWorkDay(date, workDays)
+-        return Slot(normalized, if (normalized == date) startHalfFromTime(project.startTime) else 0)
++        val rawDate = project.plannedStart ?: return null
++        val normalizedDate = nextWorkDay(rawDate, workDays)
++        val half = if (normalizedDate == rawDate) startHalfFromTime(project.startTime) else 0
++        return Slot(normalizedDate, half)
+     }
+ 
+-    private fun advanceForDuration(start: Slot, duration: Int, workDays: Set<DayOfWeek>): Slot {
+-        var slot = start
+-        repeat(duration - 1) { slot = nextSlot(slot, workDays) }
+-        return slot
++    private fun findFirstFreeContiguous(
++        earliest: Slot,
++        duration: Int,
++        occupied: Set<Slot>,
++        workDays: Set<DayOfWeek>,
++    ): Slot {
++        var candidate = normalizedStartSlot(earliest.date, earliest.half, workDays)
++        var guard = 0
++        while (guard++ < 20_000) {
++            val slots = slotsFor(candidate, duration, workDays)
++            val conflict = slots.firstOrNull { it in occupied }
++            if (conflict == null) return candidate
++            candidate = nextSlot(conflict, workDays)
++        }
++        error("Не удалось рассчитать свободное окно")
++    }
++
++    private fun slotsFor(start: Slot, duration: Int, workDays: Set<DayOfWeek>): List<Slot> {
++        val result = ArrayList<Slot>(duration.coerceAtLeast(1))
++        var slot = normalizedStartSlot(start.date, start.half, workDays)
++        repeat(duration.coerceAtLeast(1)) {
++            result += slot
++            slot = nextSlot(slot, workDays)
++        }
++        return result
+     }
+ 
+-    private fun gapCapacity(gap: FreeWindow, workDays: Set<DayOfWeek>): Int {
+-        var slot = Slot(gap.startDate, gap.startHalf)
+-        val end = Slot(gap.endDate, gap.endHalf)
+-        var count = 0
+-        while (compareSlots(slot, end) <= 0 && count < 10_000) {
+-            count++
+-            if (slot == end) break
+-            slot = nextSlot(slot, workDays)
++    private fun collectGaps(initial: Slot, latest: Slot, occupied: Set<Slot>, workDays: Set<DayOfWeek>): List<FreeWindow> {
++        if (initial > latest) return emptyList()
++        val gaps = mutableListOf<FreeWindow>()
++        var cursor = initial
++        var gapStart: Slot? = null
++        var previous: Slot? = null
++        var guard = 0
++        while (cursor <= latest && guard++ < 20_000) {
++            if (cursor !in occupied) {
++                if (gapStart == null) gapStart = cursor
++                previous = cursor
++            } else if (gapStart != null && previous != null) {
++                gaps += FreeWindow(gapStart.date, gapStart.half, previous.date, previous.half)
++                gapStart = null
++                previous = null
++            }
++            if (cursor == latest) break
++            cursor = nextSlot(cursor, workDays)
+         }
+-        return count
++        if (gapStart != null && previous != null) gaps += FreeWindow(gapStart.date, gapStart.half, previous.date, previous.half)
++        return gaps
+     }
+ 
+-    /** Number of half-day slots that are fully behind the current planning cursor. */
+     private fun countElapsedBefore(start: Slot, cursor: Slot, workDays: Set<DayOfWeek>): Int {
+-        if (compareSlots(start, cursor) >= 0) return 0
++        if (start >= cursor) return 0
+         var slot = start
+         var count = 0
+-        while (compareSlots(slot, cursor) < 0 && count < 20_000) {
+-            // The explicit actual start is respected even if the configured work days changed later.
++        var guard = 0
++        while (slot < cursor && guard++ < 20_000) {
+             if (slot.date == start.date || workDays.isEmpty() || slot.date.dayOfWeek in workDays) count++
+             slot = nextSlot(slot, workDays)
+         }
+         return count
+     }
+ 
+-    private fun compareSlots(a: Slot, b: Slot): Int {
+-        val dateCmp = a.date.compareTo(b.date)
+-        return if (dateCmp != 0) dateCmp else a.half.compareTo(b.half)
++    private fun normalizedStartSlot(from: LocalDate, fromHalf: Int, workDays: Set<DayOfWeek>): Slot {
++        val date = nextWorkDay(from, workDays)
++        return if (date == from) Slot(date, fromHalf.coerceIn(0, 1)) else Slot(date, 0)
+     }
+ 
++    private fun maxSlot(a: Slot, b: Slot): Slot = if (a >= b) a else b
++
+     private fun nextSlot(slot: Slot, workDays: Set<DayOfWeek>): Slot =
+         if (slot.half == 0) Slot(slot.date, 1)
+         else Slot(nextWorkDay(slot.date.plusDays(1), workDays), 0)
+ 
+-    private fun previousSlot(slot: Slot, workDays: Set<DayOfWeek>): Slot =
+-        if (slot.half == 1) Slot(slot.date, 0)
+-        else Slot(previousWorkDay(slot.date.minusDays(1), workDays), 1)
+-
+     fun nextWorkDay(start: LocalDate, workDays: Set<DayOfWeek>): LocalDate {
+         if (workDays.isEmpty()) return start
+-        var d = start
+-        repeat(8) {
+-            if (d.dayOfWeek in workDays) return d
+-            d = d.plusDays(1)
+-        }
+-        return start
+-    }
+-
+-    private fun previousWorkDay(start: LocalDate, workDays: Set<DayOfWeek>): LocalDate {
+-        if (workDays.isEmpty()) return start
+-        var d = start
++        var date = start
+         repeat(8) {
+-            if (d.dayOfWeek in workDays) return d
+-            d = d.minusDays(1)
++            if (date.dayOfWeek in workDays) return date
++            date = date.plusDays(1)
+         }
+         return start
+     }
+diff -ruN WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt
+--- WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt	2026-08-30 21:29:11.785398221 +0000
++++ MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt	2026-08-30 21:27:16.019562823 +0000
+@@ -6,6 +6,7 @@
+ import java.time.DayOfWeek
+ import java.time.LocalDate
+ import java.time.LocalTime
++import java.time.Instant
+ 
+ class SchedulerTest {
+     private val workDays = setOf(
+@@ -73,9 +74,13 @@
+         val result = Scheduler.calculate(listOf(
+             Project(id=1,title="Будущий монтаж",clientName="A",plannedStart=LocalDate.of(2026,9,10),durationHalfDays=2,queuePosition=1),
+         ), workDays, LocalDate.of(2026,9,1))
+-        val estimate = Scheduler.estimateNewJob(result, 4, workDays)
+-        assertEquals(LocalDate.of(2026,9,1), estimate.first)
+-        assertEquals(LocalDate.of(2026,9,2), estimate.second)
++        val estimate = Scheduler.estimateNewJob(
++            result, 4, workDays, LocalDate.of(2026,9,1), 0
++        )
++        assertEquals(LocalDate.of(2026,9,1), estimate.startDate)
++        assertEquals(0, estimate.startHalf)
++        assertEquals(LocalDate.of(2026,9,2), estimate.endDate)
++        assertEquals(1, estimate.endHalf)
+     }
+     @Test fun eveningStartsPlanningFromNextWorkDay() {
+         va
