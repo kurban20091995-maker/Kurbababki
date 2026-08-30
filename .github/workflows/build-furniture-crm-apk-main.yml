@@ -1,4 +1,4 @@
-name: Build Master Object Optimized APK
+name: Build Master Object All Dates APK
 
 on:
   push:
@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  audit-build:
+  date-audit-build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout audited source branch
+      - name: Checkout source branch
         uses: actions/checkout@v4
         with:
           ref: furniture-crm-android-build
@@ -64,7 +64,7 @@ jobs:
           mkdir build-src
           unzip -q MasterObject-Android.zip -d build-src
 
-      - name: Reconstruct and verify full audit patch
+      - name: Reconstruct verified audit patch
         run: |
           cat \
             .masterobject-audit/first0 \
@@ -76,19 +76,41 @@ jobs:
           test "$(wc -c < /tmp/masterobject-audit.patch)" -eq 57527
           echo '836117787d481196d93989f0f5df33821a947deb482b6f98ca00d0c60a96521d  /tmp/masterobject-audit.patch' | sha256sum -c -
 
-      - name: Apply audited fixes
+      - name: Apply audit optimizations
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: patch -p1 < /tmp/masterobject-audit.patch
 
-      - name: Verify audited source configuration
+      - name: Reconstruct verified all-date patch
+        run: |
+          head -c 9000 .masterobject-dates/part00 > /tmp/masterobject-dates.patch
+          cat \
+            .masterobject-dates/part01 \
+            .masterobject-dates/part02 \
+            .masterobject-dates/part03 \
+            .masterobject-dates/part04 \
+            .masterobject-dates/part05 \
+            .masterobject-dates/part06 >> /tmp/masterobject-dates.patch
+          test "$(wc -c < /tmp/masterobject-dates.patch)" -eq 58898
+          echo 'baff40e9517ae68df7fe1f80db5cb317e8cbf75362169eaa2497f6e71fe3c00f  /tmp/masterobject-dates.patch' | sha256sum -c -
+
+      - name: Apply all date fixes
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: patch -p1 < /tmp/masterobject-dates.patch
+
+      - name: Verify final source configuration
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: |
-          grep -F 'applicationId = "ru.masterobject.crm"' app/build.gradle.kts
-          grep -F 'versionCode = 10' app/build.gradle.kts
-          grep -F 'versionName = "2.0.0"' app/build.gradle.kts
+          grep -F 'applicationId = "ru.masterobject.stable"' app/build.gradle.kts
+          grep -F 'versionCode = 200' app/build.gradle.kts
+          grep -F 'versionName = "2.2.0"' app/build.gradle.kts
+          grep -F 'const val ZONE_ID = "Europe/Moscow"' app/src/main/java/ru/furniturecrm/app/BusinessTime.kt
           grep -F 'SQLiteOpenHelper(context, "furniture_crm.db", null, 3)' app/src/main/java/ru/furniturecrm/app/Database.kt
+          if grep -R 'LocalDate.now()' app/src/main/java/ru/furniturecrm/app --exclude=BusinessTime.kt; then
+            echo 'Direct LocalDate.now() remains outside BusinessTime' >&2
+            exit 1
+          fi
 
-      - name: Run unit tests
+      - name: Run date and unit tests
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon testDebugUnitTest --stacktrace
 
@@ -101,20 +123,20 @@ jobs:
         run: gradle --no-daemon assembleDebug --stacktrace
 
       - name: Prepare final APK
-        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject-Optimized.apk
+        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject-AllDates.apk
 
-      - name: Verify APK signature and identity
+      - name: Verify APK signature identity and version
         run: |
-          test -s MasterObject-Optimized.apk
-          file MasterObject-Optimized.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs MasterObject-Optimized.apk
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging MasterObject-Optimized.apk | tee /tmp/badging.txt
-          grep -F "package: name='ru.masterobject.crm' versionCode='10' versionName='2.0.0'" /tmp/badging.txt
-          sha256sum MasterObject-Optimized.apk
+          test -s MasterObject-AllDates.apk
+          file MasterObject-AllDates.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs MasterObject-AllDates.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging MasterObject-AllDates.apk | tee /tmp/badging.txt
+          grep -F "package: name='ru.masterobject.stable' versionCode='200' versionName='2.2.0'" /tmp/badging.txt
+          sha256sum MasterObject-AllDates.apk
 
       - name: Upload verified APK
         uses: actions/upload-artifact@v4
         with:
-          name: MasterObject-Optimized-APK
-          path: MasterObject-Optimized.apk
+          name: MasterObject-AllDates-APK
+          path: MasterObject-AllDates.apk
           if-no-files-found: error
