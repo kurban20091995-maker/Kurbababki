@@ -98,6 +98,21 @@ jobs:
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: patch -p2 < /tmp/masterobject-calendar.patch
 
+      - name: Fix strict Kotlin type inference
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/ru/furniturecrm/app/Repository.kt')
+          s = p.read_text()
+          old = '''            arrayOf(\n                if (c.isNull(0)) null else c.getString(0),\n                if (c.isNull(1)) null else c.getInt(1),'''
+          new = '''            arrayOf<Any?>(\n                if (c.isNull(0)) null else c.getString(0),\n                if (c.isNull(1)) null else c.getInt(1),'''
+          if old not in s:
+              raise SystemExit('Repository type-inference hotfix target not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          grep -F 'arrayOf<Any?>(' app/src/main/java/ru/furniturecrm/app/Repository.kt
+
       - name: Verify final source configuration
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: |
