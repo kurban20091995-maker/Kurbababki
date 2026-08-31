@@ -79,6 +79,7 @@ jobs:
           fi
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/signature.txt
+          grep -q 'Verified using v1 scheme (JAR signing): true' /tmp/signature.txt
           grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' /tmp/signature.txt
 
       - name: Enable KVM
@@ -96,15 +97,18 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            set -euxo pipefail
+            set -eu
             APK="$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/debug/app-debug.apk"
             adb install "$APK"
             adb shell pm path ru.raschet.ku
             adb shell am force-stop ru.raschet.ku
-            adb shell am start -W -n ru.raschet.ku/.MainActivity | tee /tmp/launch.txt
+            adb shell am start -W -n ru.raschet.ku/.MainActivity > /tmp/launch.txt
+            cat /tmp/launch.txt
             grep -q 'Status: ok' /tmp/launch.txt
             sleep 2
-            adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | grep 'ru.raschet.ku'
+            adb shell dumpsys activity activities | grep 'ru.raschet.ku' >/tmp/activity.txt
+            cat /tmp/activity.txt
+            test -s /tmp/activity.txt
 
       - name: Copy final APK
         run: cp raschet-ku/app/build/outputs/apk/debug/app-debug.apk 'Raschet-KU-FINAL.apk'
