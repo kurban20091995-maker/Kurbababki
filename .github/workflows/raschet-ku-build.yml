@@ -25,12 +25,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
-
-      - name: Install Android SDK 35
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          gradle-version: '8.9'
 
       - name: Prepare launcher icons from supplied image
         run: |
@@ -69,7 +64,8 @@ jobs:
         run: |
           set -euxo pipefail
           APK="$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/debug/app-debug.apk"
-          BT="$ANDROID_HOME/build-tools/35.0.0"
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          echo "Using build-tools: $BT"
           test -f "$APK"
           unzip -t "$APK" >/dev/null
           unzip -l "$APK" | grep -q 'classes.dex'
