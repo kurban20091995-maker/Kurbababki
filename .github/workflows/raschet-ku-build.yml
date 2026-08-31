@@ -97,16 +97,14 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            set -eu
-            APK="$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/debug/app-debug.apk"
-            adb install "$APK"
+            adb install "$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/debug/app-debug.apk"
             adb shell pm path ru.raschet.ku
             adb shell am force-stop ru.raschet.ku
             adb shell am start -W -n ru.raschet.ku/.MainActivity > /tmp/launch.txt
             cat /tmp/launch.txt
             grep -q 'Status: ok' /tmp/launch.txt
             sleep 2
-            adb shell dumpsys activity activities | grep 'ru.raschet.ku' >/tmp/activity.txt
+            adb shell dumpsys activity activities | grep 'ru.raschet.ku' > /tmp/activity.txt
             cat /tmp/activity.txt
             test -s /tmp/activity.txt
 
