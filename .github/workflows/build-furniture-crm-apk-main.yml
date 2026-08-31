@@ -1,4 +1,4 @@
-name: Build Master Object All Dates APK
+name: Build Master Object Calendar Fix APK
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  date-audit-build:
+  calendar-build:
     runs-on: ubuntu-latest
 
     steps:
@@ -80,37 +80,40 @@ jobs:
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: patch -p1 < /tmp/masterobject-audit.patch
 
-      - name: Reconstruct verified all-date patch
+      - name: Reconstruct verified calendar patch
         run: |
-          head -c 9000 .masterobject-dates/part00 > /tmp/masterobject-dates.patch
-          cat \
-            .masterobject-dates/part01 \
-            .masterobject-dates/part02 \
-            .masterobject-dates/part03 \
-            .masterobject-dates/part04 \
-            .masterobject-dates/part05 \
-            .masterobject-dates/part06 >> /tmp/masterobject-dates.patch
-          test "$(wc -c < /tmp/masterobject-dates.patch)" -eq 58898
-          echo 'baff40e9517ae68df7fe1f80db5cb317e8cbf75362169eaa2497f6e71fe3c00f  /tmp/masterobject-dates.patch' | sha256sum -c -
+          : > /tmp/calendar.b64
+          head -c 7200 .masterobject-calendar/part00 >> /tmp/calendar.b64
+          head -c 7200 .masterobject-calendar/part01 >> /tmp/calendar.b64
+          head -c 7200 .masterobject-calendar/part02 >> /tmp/calendar.b64
+          head -c 7200 .masterobject-calendar/part03 >> /tmp/calendar.b64
+          head -c 20 .masterobject-calendar/part04 >> /tmp/calendar.b64
+          test "$(wc -c < /tmp/calendar.b64)" -eq 28820
+          echo 'd01526a39d9a8db200971423b0e4b66ea98f86c71d0fcd1a65ebc66e2a82f112  /tmp/calendar.b64' | sha256sum -c -
+          base64 --decode /tmp/calendar.b64 | gunzip > /tmp/masterobject-calendar.patch
+          test "$(wc -c < /tmp/masterobject-calendar.patch)" -eq 98478
+          echo '63ace970c3cdfa1d846f51709c3d90a3cf28cd29b3989e0bb798495c7b41a320  /tmp/masterobject-calendar.patch' | sha256sum -c -
 
-      - name: Apply all date fixes
+      - name: Apply calendar and scheduling fixes
         working-directory: build-src/FurnitureInstallerCRM-Android
-        run: patch -p2 < /tmp/masterobject-dates.patch
+        run: patch -p2 < /tmp/masterobject-calendar.patch
 
       - name: Verify final source configuration
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: |
-          grep -F 'applicationId = "ru.masterobject.stable"' app/build.gradle.kts
-          grep -F 'versionCode = 200' app/build.gradle.kts
-          grep -F 'versionName = "2.2.0"' app/build.gradle.kts
+          grep -F 'applicationId = "ru.masterobject.calendarfix"' app/build.gradle.kts
+          grep -F 'versionCode = 300' app/build.gradle.kts
+          grep -F 'versionName = "3.0.0"' app/build.gradle.kts
           grep -F 'const val ZONE_ID = "Europe/Moscow"' app/src/main/java/ru/furniturecrm/app/BusinessTime.kt
-          grep -F 'SQLiteOpenHelper(context, "furniture_crm.db", null, 3)' app/src/main/java/ru/furniturecrm/app/Database.kt
-          if grep -R 'LocalDate.now()' app/src/main/java/ru/furniturecrm/app --exclude=BusinessTime.kt; then
-            echo 'Direct LocalDate.now() remains outside BusinessTime' >&2
+          grep -F 'SQLiteOpenHelper(context, "furniture_crm.db", null, 4)' app/src/main/java/ru/furniturecrm/app/Database.kt
+          grep -F 'CREATE TABLE calendar_exceptions' app/src/main/java/ru/furniturecrm/app/Database.kt
+          grep -F 'remaining_half_days' app/src/main/java/ru/furniturecrm/app/Database.kt
+          if grep -R -E 'LocalDate\.now\(\)|LocalDateTime\.now\(\)|ZonedDateTime\.now\(\)' app/src/main/java/ru/furniturecrm/app --exclude=BusinessTime.kt; then
+            echo 'Direct system date/time remains outside BusinessTime' >&2
             exit 1
           fi
 
-      - name: Run date and unit tests
+      - name: Run regression and unit tests
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon testDebugUnitTest --stacktrace
 
@@ -123,20 +126,20 @@ jobs:
         run: gradle --no-daemon assembleDebug --stacktrace
 
       - name: Prepare final APK
-        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject-AllDates.apk
+        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject-CalendarFix.apk
 
       - name: Verify APK signature identity and version
         run: |
-          test -s MasterObject-AllDates.apk
-          file MasterObject-AllDates.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs MasterObject-AllDates.apk
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging MasterObject-AllDates.apk | tee /tmp/badging.txt
-          grep -F "package: name='ru.masterobject.stable' versionCode='200' versionName='2.2.0'" /tmp/badging.txt
-          sha256sum MasterObject-AllDates.apk
+          test -s MasterObject-CalendarFix.apk
+          file MasterObject-CalendarFix.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs MasterObject-CalendarFix.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging MasterObject-CalendarFix.apk | tee /tmp/badging.txt
+          grep -F "package: name='ru.masterobject.calendarfix' versionCode='300' versionName='3.0.0'" /tmp/badging.txt
+          sha256sum MasterObject-CalendarFix.apk
 
       - name: Upload verified APK
         uses: actions/upload-artifact@v4
         with:
-          name: MasterObject-AllDates-APK
-          path: MasterObject-AllDates.apk
+          name: MasterObject-CalendarFix-APK
+          path: MasterObject-CalendarFix.apk
           if-no-files-found: error
