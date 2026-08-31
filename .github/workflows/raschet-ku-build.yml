@@ -1,0 +1,111 @@
+name: Build Raschet KU APK
+
+on:
+  push:
+    branches: [ "tmp-raschet-ku-build" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Prepare isolated project
+        run: |
+          rm -rf raschet-ku
+          mkdir raschet-ku
+          unzip -q raschet-ku-project.zip -d raschet-ku
+
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Verify formulas
+        run: |
+          python3 - <<'PY'
+          import math
+          C=90.0; S=45.0
+          m=math.degrees(math.atan(math.sin(math.radians(S))/math.tan(math.radians(C)/2)))
+          b=math.degrees(math.asin(math.cos(math.radians(S))*math.cos(math.radians(C)/2)))
+          hp=math.degrees(math.atan(100/100))
+          lp=math.degrees(math.asin(100/141.42))
+          print('90/45:', m, b)
+          print('H+P:', hp)
+          print('L+P:', lp)
+          assert abs(m-35.26438968) < 0.001
+          assert abs(b-30.0) < 0.001
+          assert abs(hp-45.0) < 0.001
+          assert abs(lp-45.00055) < 0.01
+          PY
+
+      - name: Build APK
+        working-directory: raschet-ku
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Verify APK structure, label, package, alignment and signatures
+        run: |
+          APK="$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/debug/app-debug.apk"
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          test -f "$APK"
+          unzip -t "$APK" >/dev/null
+          unzip -l "$APK" | grep -q 'classes.dex'
+          "$BT/aapt2" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='ru.raschet.ku'" /tmp/badging.txt
+          grep -Fq "application-label:'Расчет к.у.'" /tmp/badging.txt
+          grep -q 'application-icon-' /tmp/badging.txt
+          "$BT/zipalign" -c -v 4 "$APK"
+          "$BT/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/signature.txt
+          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' /tmp/signature.txt
+          echo 'APK verification passed.'
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install and launch on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            APK="$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/debug/app-debug.apk"
+            adb install -r "$APK"
+            adb shell pm path ru.raschet.ku
+            adb shell am force-stop ru.raschet.ku
+            adb shell am start -W -n ru.raschet.ku/.MainActivity
+            sleep 3
+            adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | grep 'ru.raschet.ku'
+
+      - name: Copy final APK
+        run: cp raschet-ku/app/build/outputs/apk/debug/app-debug.apk 'Расчет-к.у.-FINAL.apk'
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Raschet-KU-FINAL
+          path: 'Расчет-к.у.-FINAL.apk'
+          if-no-files-found: error
+          retention-days: 7
