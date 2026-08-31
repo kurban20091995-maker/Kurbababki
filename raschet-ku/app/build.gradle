@@ -1,0 +1,22 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'ru.raschet.ku'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'ru.raschet.ku'
+        minSdk 21
+        targetSdk 35
+        versionCode 4
+        versionName '4.0.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+}

@@ -27,16 +27,22 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Prepare isolated project
-        run: |
-          rm -rf raschet-ku
-          mkdir raschet-ku
-          unzip -q raschet-ku-project.zip -d raschet-ku
-
       - name: Install Android SDK 35
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Prepare launcher icons from supplied image
+        run: |
+          set -euxo pipefail
+          command -v convert >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y imagemagick; }
+          test -s raschet-ku/icon-source.webp
+          for spec in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            density="${spec%%:*}"; size="${spec##*:}"
+            mkdir -p "raschet-ku/app/src/main/res/mipmap-${density}"
+            convert raschet-ku/icon-source.webp -resize "${size}x${size}" "raschet-ku/app/src/main/res/mipmap-${density}/ic_launcher.png"
+          done
+          file raschet-ku/app/src/main/res/mipmap-*/ic_launcher.png
 
       - name: Verify formulas
         run: |
@@ -47,21 +53,21 @@ jobs:
           b=math.degrees(math.asin(math.cos(math.radians(S))*math.cos(math.radians(C)/2)))
           hp=math.degrees(math.atan(100/100))
           lp=math.degrees(math.asin(100/141.42))
-          print('90/45:', m, b)
-          print('H+P:', hp)
-          print('L+P:', lp)
+          print('90/45 miter/bevel:', m, b)
+          print('H+P:', hp, 'L+P:', lp)
           assert abs(m-35.26438968) < 0.001
           assert abs(b-30.0) < 0.001
           assert abs(hp-45.0) < 0.001
-          assert abs(lp-45.00055) < 0.01
+          assert abs(lp-45.00054948) < 0.01
           PY
 
       - name: Build APK
         working-directory: raschet-ku
         run: gradle --no-daemon clean assembleDebug
 
-      - name: Verify APK structure, label, package, alignment and signatures
+      - name: Verify APK structure, metadata, permissions, alignment and signature
         run: |
+          set -euxo pipefail
           APK="$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/debug/app-debug.apk"
           BT="$ANDROID_HOME/build-tools/35.0.0"
           test -f "$APK"
@@ -71,10 +77,13 @@ jobs:
           grep -Fq "package: name='ru.raschet.ku'" /tmp/badging.txt
           grep -Fq "application-label:'Расчет к.у.'" /tmp/badging.txt
           grep -q 'application-icon-' /tmp/badging.txt
+          "$BT/aapt2" dump permissions "$APK" | tee /tmp/permissions.txt
+          if grep -Eq 'CAMERA|RECORD_AUDIO|ACCESS_FINE_LOCATION|ACCESS_COARSE_LOCATION|READ_CONTACTS|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|INTERNET' /tmp/permissions.txt; then
+            echo 'Unexpected permission found'; exit 1
+          fi
           "$BT/zipalign" -c -v 4 "$APK"
           "$BT/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/signature.txt
           grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' /tmp/signature.txt
-          echo 'APK verification passed.'
 
       - name: Enable KVM
         run: |
@@ -91,21 +100,23 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
+            set -euxo pipefail
             APK="$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/debug/app-debug.apk"
-            adb install -r "$APK"
+            adb install "$APK"
             adb shell pm path ru.raschet.ku
             adb shell am force-stop ru.raschet.ku
-            adb shell am start -W -n ru.raschet.ku/.MainActivity
-            sleep 3
+            adb shell am start -W -n ru.raschet.ku/.MainActivity | tee /tmp/launch.txt
+            grep -q 'Status: ok' /tmp/launch.txt
+            sleep 2
             adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | grep 'ru.raschet.ku'
 
       - name: Copy final APK
-        run: cp raschet-ku/app/build/outputs/apk/debug/app-debug.apk 'Расчет-к.у.-FINAL.apk'
+        run: cp raschet-ku/app/build/outputs/apk/debug/app-debug.apk 'Raschet-KU-FINAL.apk'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Raschet-KU-FINAL
-          path: 'Расчет-к.у.-FINAL.apk'
+          path: Raschet-KU-FINAL.apk
           if-no-files-found: error
           retention-days: 7
