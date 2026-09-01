@@ -1,0 +1,1 @@
+Trigger build for Raskroy-Karniza APK.
