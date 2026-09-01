@@ -1,0 +1,56 @@
+name: Build Saldo APK
+
+on:
+  push:
+    branches: [saldo-build-20260901]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore Saldo source archive
+        shell: bash
+        run: |
+          cat saldo-build-payload/part_* > saldo-source.b64
+          base64 --decode saldo-source.b64 > Saldo-source.zip
+          unzip -t Saldo-source.zip
+          unzip -q Saldo-source.zip
+          test -f Saldo/settings.gradle.kts
+          test -f Saldo/app/build.gradle.kts
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Android lint
+        working-directory: Saldo
+        run: gradle lintDebug --stacktrace
+
+      - name: Unit tests
+        working-directory: Saldo
+        run: gradle testDebugUnitTest --stacktrace
+
+      - name: Build debug APK
+        working-directory: Saldo
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Saldo-debug-apk
+          path: Saldo/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
