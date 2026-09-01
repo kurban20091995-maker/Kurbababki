@@ -1,17 +1,20 @@
 name: Build Cornice Cut Optimizer APK
 
 on:
-  push:
-    branches: [ cornice-cut-optimizer ]
   workflow_dispatch:
+  issues:
+    types: [opened]
 
 jobs:
   build:
+    if: github.event_name != 'issues' || github.event.issue.title == 'build-cornice-apk'
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
