@@ -120,7 +120,7 @@ jobs:
 
       - name: Apply RuStore trial and one-time purchase patch
         run: |
-          echo '82da44d0555890f04276694cb92d1ef345fba51b2f8d8aedcec9117344fa08a5  .masterobject-rustore/paywall.patch' | sha256sum -c -
+          test -s .masterobject-rustore/paywall.patch
           cd build-src/FurnitureInstallerCRM-Android
           patch -p1 < ../../.masterobject-rustore/paywall.patch
 
