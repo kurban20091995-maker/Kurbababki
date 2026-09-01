@@ -1,4 +1,4 @@
-name: Export CalendarFix Source
+name: Build Master Object Phone Calendar APK
 
 on:
   push:
@@ -8,13 +8,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  export-source:
+  phone-calendar-build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout source branch
         uses: actions/checkout@v4
         with:
           ref: furniture-crm-android-build
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 36 SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Setup Gradle 9.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
 
       - name: Reconstruct verified Master Object base
         run: |
@@ -58,7 +76,7 @@ jobs:
           cd build-src/FurnitureInstallerCRM-Android
           patch -p1 < /tmp/masterobject-audit.patch
 
-      - name: Apply verified calendar patch
+      - name: Apply verified CalendarFix source patch
         run: |
           : > /tmp/calendar.b64
           head -c 7200 .masterobject-calendar/part00 >> /tmp/calendar.b64
@@ -78,19 +96,61 @@ jobs:
           old = '''            arrayOf(\n                if (c.isNull(0)) null else c.getString(0),\n                if (c.isNull(1)) null else c.getInt(1),'''
           new = '''            arrayOf<Any?>(\n                if (c.isNull(0)) null else c.getString(0),\n                if (c.isNull(1)) null else c.getInt(1),'''
           if old not in s:
-              raise SystemExit('hotfix target not found')
+              raise SystemExit('CalendarFix type hotfix target not found')
           p.write_text(s.replace(old, new, 1))
           PY
 
-      - name: Archive exact source
+      - name: Apply phone-calendar and duration fix
         run: |
-          cd build-src
-          zip -qr ../MasterObject-CalendarFix-Source.zip FurnitureInstallerCRM-Android
-          sha256sum ../MasterObject-CalendarFix-Source.zip
+          cat .masterobject-phonecalendar/part00 .masterobject-phonecalendar/part01 > /tmp/phonecalendar.b64
+          test "$(wc -c < /tmp/phonecalendar.b64)" -eq 10332
+          echo '5cc495699ce2489f4a5ac84e22b0f6c97b33e130bf8c5dcff40580aaafd693d4  /tmp/phonecalendar.b64' | sha256sum -c -
+          base64 --decode /tmp/phonecalendar.b64 | gunzip > /tmp/phonecalendar.patch
+          echo '0a4f4e0e1f19cc62a1f1c12c10b6fb4617dba21d45c480956a4122dc62f73378  /tmp/phonecalendar.patch' | sha256sum -c -
+          cd build-src/FurnitureInstallerCRM-Android
+          patch -p2 < /tmp/phonecalendar.patch
 
-      - name: Upload exact source
+      - name: Verify corrected source invariants
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: |
+          grep -F 'applicationId = "ru.masterobject.phonecalendar"' app/build.gradle.kts
+          grep -F 'versionCode = 400' app/build.gradle.kts
+          grep -F 'versionName = "4.0.0"' app/build.gradle.kts
+          grep -F 'ZoneId.systemDefault()' app/src/main/java/ru/furniturecrm/app/BusinessTime.kt
+          ! grep -R 'Europe/Moscow' app/src/main/java/ru/furniturecrm/app
+          grep -F 'SQLiteOpenHelper(context, "furniture_crm.db", null, 5)' app/src/main/java/ru/furniturecrm/app/Database.kt
+          grep -F "VALUES('work_days','1,2,3,4,5,6,7')" app/src/main/java/ru/furniturecrm/app/Database.kt
+          grep -F 'legacyFridayOnlySettingCannotStretchTwoDaysIntoTwoWeeks' app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt
+          grep -F 'startedSeptemberFirstForTwoDaysEndsSeptemberSecond' app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt
+          grep -F 'Выбрать в календаре телефона' app/src/main/java/ru/furniturecrm/app/CrmApp.kt
+
+      - name: Run scheduler regression and unit tests
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: gradle --no-daemon testDebugUnitTest --stacktrace
+
+      - name: Run Android Lint
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: gradle --no-daemon lintDebug --stacktrace
+
+      - name: Build APK
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: gradle --no-daemon assembleDebug --stacktrace
+
+      - name: Prepare final APK
+        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject-PhoneCalendar.apk
+
+      - name: Verify final APK
+        run: |
+          test -s MasterObject-PhoneCalendar.apk
+          file MasterObject-PhoneCalendar.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs MasterObject-PhoneCalendar.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging MasterObject-PhoneCalendar.apk | tee /tmp/badging.txt
+          grep -F "package: name='ru.masterobject.phonecalendar' versionCode='400' versionName='4.0.0'" /tmp/badging.txt
+          sha256sum MasterObject-PhoneCalendar.apk
+
+      - name: Upload verified APK
         uses: actions/upload-artifact@v4
         with:
-          name: MasterObject-CalendarFix-Source
-          path: MasterObject-CalendarFix-Source.zip
+          name: MasterObject-PhoneCalendar-APK
+          path: MasterObject-PhoneCalendar.apk
           if-no-files-found: error
