@@ -1,4 +1,4 @@
-name: Build Master Object Phone Calendar APK
+name: Build Master Object RuStore Paywall
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  phone-calendar-build:
+  rustore-paywall-build:
     runs-on: ubuntu-latest
 
     steps:
@@ -117,56 +117,74 @@ jobs:
           sed -i 's/plannedStart=LocalDate.of(2026,9,5),durationHalfDays=4/plannedStart=LocalDate.of(2026,9,6),durationHalfDays=4/' "$TEST"
           sed -i 's/workDays,exceptions,LocalDate.of(2026,9,5),0/workDays,exceptions,LocalDate.of(2026,9,6),0/' "$TEST"
           sed -i '0,/assertEquals(LocalDate.of(2026,9,5),item.startDate)/s//assertEquals(LocalDate.of(2026,9,6),item.startDate)/' "$TEST"
-          grep -A10 -F 'oneOffDayOffIsSkippedWithoutChangingOtherMondays' "$TEST"
 
-      - name: Verify corrected source invariants
+      - name: Apply RuStore trial and one-time purchase patch
+        run: |
+          echo '82da44d0555890f04276694cb92d1ef345fba51b2f8d8aedcec9117344fa08a5  .masterobject-rustore/paywall.patch' | sha256sum -c -
+          cd build-src/FurnitureInstallerCRM-Android
+          patch -p1 < ../../.masterobject-rustore/paywall.patch
+
+      - name: Verify paywall source invariants
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: |
-          grep -F 'applicationId = "ru.masterobject.phonecalendar"' app/build.gradle.kts
-          grep -F 'versionCode = 400' app/build.gradle.kts
-          grep -F 'versionName = "4.0.0"' app/build.gradle.kts
+          grep -F 'applicationId = "ru.masterobject.app"' app/build.gradle.kts
+          grep -F 'versionCode = 1' app/build.gradle.kts
+          grep -F 'versionName = "1.0.0"' app/build.gradle.kts
+          grep -F 'const val TRIAL_DAYS: Long = 3' app/src/main/java/ru/furniturecrm/app/LicensePolicy.kt
+          grep -F 'priceLabel = "199 ₽"' app/src/main/java/ru/furniturecrm/app/RuStoreLicenseManager.kt
+          grep -F 'implementation("ru.rustore.sdk:pay")' app/build.gradle.kts
+          grep -F 'master_object_full_199' app/build.gradle.kts
+          grep -F 'ENFORCE_PAYWALL' app/build.gradle.kts
+          grep -F 'Восстановить покупку' app/src/main/java/ru/furniturecrm/app/LicenseUi.kt
+          grep -F 'Экспортировать свои данные' app/src/main/java/ru/furniturecrm/app/LicenseUi.kt
           grep -F 'ZoneId.systemDefault()' app/src/main/java/ru/furniturecrm/app/BusinessTime.kt
-          ! grep -R 'Europe/Moscow' app/src/main/java/ru/furniturecrm/app
-          grep -F 'SQLiteOpenHelper(context, "furniture_crm.db", null, 5)' app/src/main/java/ru/furniturecrm/app/Database.kt
-          grep -F "VALUES('work_days','1,2,3,4,5,6,7')" app/src/main/java/ru/furniturecrm/app/Database.kt
-          grep -F 'legacyFridayOnlySettingCannotStretchTwoDaysIntoTwoWeeks' app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt
-          grep -F 'startedSeptemberFirstForTwoDaysEndsSeptemberSecond' app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt
-          grep -F 'Выбрать в календаре телефона' app/src/main/java/ru/furniturecrm/app/CrmApp.kt
 
-      - name: Upload reconstructed source snapshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: MasterObject-PhoneCalendar-Source
-          path: build-src/FurnitureInstallerCRM-Android
-          if-no-files-found: error
-
-      - name: Run scheduler regression and unit tests
+      - name: Run all unit tests including license policy
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon testDebugUnitTest --stacktrace
+
+      - name: Dump RuStore Pay SDK classes on compile failure
+        if: failure()
+        run: |
+          echo '--- RuStore SDK cache ---'
+          find ~/.gradle/caches/modules-2/files-2.1/ru.rustore.sdk -type f 2>/dev/null | sort | tail -100 || true
+          AAR=$(find ~/.gradle/caches/modules-2/files-2.1/ru.rustore.sdk -name '*.aar' 2>/dev/null | grep '/pay/' | head -1 || true)
+          if [ -n "$AAR" ]; then
+            echo "Inspecting $AAR"
+            unzip -p "$AAR" classes.jar > /tmp/rustore-pay-classes.jar
+            jar tf /tmp/rustore-pay-classes.jar | grep -E 'RuStorePayClient|ProductPurchaseParams|ProductId|PreferredPurchaseType|PurchaseInteractor|IntentInteractor' | head -200 || true
+          fi
 
       - name: Run Android Lint
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon lintDebug --stacktrace
 
-      - name: Build APK
+      - name: Build RuStore preview APK
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon assembleDebug --stacktrace
 
-      - name: Prepare final APK
-        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject-PhoneCalendar.apk
+      - name: Prepare preview APK
+        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject-RuStore-Preview.apk
 
-      - name: Verify final APK
+      - name: Verify preview APK
         run: |
-          test -s MasterObject-PhoneCalendar.apk
-          file MasterObject-PhoneCalendar.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs MasterObject-PhoneCalendar.apk
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging MasterObject-PhoneCalendar.apk | tee /tmp/badging.txt
-          grep -F "package: name='ru.masterobject.phonecalendar' versionCode='400' versionName='4.0.0'" /tmp/badging.txt
-          sha256sum MasterObject-PhoneCalendar.apk
+          test -s MasterObject-RuStore-Preview.apk
+          file MasterObject-RuStore-Preview.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs MasterObject-RuStore-Preview.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging MasterObject-RuStore-Preview.apk | tee /tmp/badging.txt
+          grep -F "package: name='ru.masterobject.app' versionCode='1' versionName='1.0.0'" /tmp/badging.txt
+          sha256sum MasterObject-RuStore-Preview.apk
 
-      - name: Upload verified APK
+      - name: Upload paywall source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: MasterObject-PhoneCalendar-APK
-          path: MasterObject-PhoneCalendar.apk
+          name: MasterObject-RuStore-Source
+          path: build-src/FurnitureInstallerCRM-Android
+          if-no-files-found: error
+
+      - name: Upload preview APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MasterObject-RuStore-Preview-APK
+          path: MasterObject-RuStore-Preview.apk
           if-no-files-found: error
