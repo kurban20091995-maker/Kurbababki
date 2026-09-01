@@ -4,14 +4,16 @@ on:
   workflow_dispatch:
   issues:
     types: [opened]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
   build:
-    if: github.event_name != 'issues' || github.event.issue.title == 'build-cornice-apk'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event.issue.title == 'build-cornice-apk'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout latest main
         uses: actions/checkout@v4
         with:
           ref: main
