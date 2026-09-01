@@ -1,0 +1,650 @@
+diff -ruN rustore-base/app/build.gradle.kts rustore-src/app/build.gradle.kts
+--- rustore-base/app/build.gradle.kts	2026-09-01 16:47:14.000000000 +0000
++++ rustore-src/app/build.gradle.kts	2026-09-01 16:52:08.576515503 +0000
+@@ -8,11 +8,18 @@
+     compileSdk = 36
+ 
+     defaultConfig {
+-        applicationId = "ru.masterobject.phonecalendar"
++        applicationId = "ru.masterobject.app"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 400
+-        versionName = "4.0.0"
++        versionCode = 1
++        versionName = "1.0.0"
++
++        val rustoreConsoleAppId = providers.gradleProperty("rustoreConsoleAppId").orElse("0").get()
++        val rustoreProductId = providers.gradleProperty("rustoreProductId").orElse("master_object_full_199").get()
++        buildConfigField("String", "RUSTORE_CONSOLE_APP_ID", "\"$rustoreConsoleAppId\"")
++        buildConfigField("String", "RUSTORE_PRODUCT_ID", "\"$rustoreProductId\"")
++        resValue("string", "CONSOLE_APPLICATION_ID", rustoreConsoleAppId)
++        resValue("string", "rustore_pay_deeplink_scheme", "masterobjectpay")
+ 
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+     }
+@@ -23,7 +30,11 @@
+     }
+ 
+     buildTypes {
++        debug {
++            buildConfigField("boolean", "ENFORCE_PAYWALL", "false")
++        }
+         release {
++            buildConfigField("boolean", "ENFORCE_PAYWALL", "true")
+             isMinifyEnabled = false
+             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+         }
+@@ -55,6 +66,10 @@
+     implementation("androidx.compose.material3:material3")
+     implementation("androidx.compose.material:material-icons-extended")
+     implementation("io.coil-kt:coil-compose:2.7.0")
++
++    implementation(platform("ru.rustore.sdk:bom:2025.11.01"))
++    implementation("ru.rustore.sdk:pay")
++
+     debugImplementation("androidx.compose.ui:ui-tooling")
+ 
+     testImplementation("junit:junit:4.13.2")
+diff -ruN rustore-base/app/src/main/AndroidManifest.xml rustore-src/app/src/main/AndroidManifest.xml
+--- rustore-base/app/src/main/AndroidManifest.xml	2026-09-01 16:47:14.000000000 +0000
++++ rustore-src/app/src/main/AndroidManifest.xml	2026-09-01 16:52:21.258195250 +0000
+@@ -1,6 +1,10 @@
+-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:tools="http://schemas.android.com/tools">
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
++    <uses-permission android:name="android.permission.INTERNET" />
++    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
++    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+ 
+     <application
+         android:allowBackup="true"
+@@ -11,14 +15,37 @@
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:supportsRtl="true"
+         android:theme="@style/Theme.FurnitureCRM">
++
++        <meta-data
++            android:name="console_app_id_value"
++            android:value="@string/CONSOLE_APPLICATION_ID" />
++        <meta-data
++            android:name="sdk_pay_scheme_value"
++            android:value="@string/rustore_pay_deeplink_scheme" />
++
+         <activity
+             android:name=".MainActivity"
+-            android:exported="true">
++            android:exported="true"
++            android:launchMode="singleTop">
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+                 <category android:name="android.intent.category.LAUNCHER" />
+             </intent-filter>
++            <intent-filter>
++                <action android:name="android.intent.action.VIEW" />
++                <category android:name="android.intent.category.DEFAULT" />
++                <category android:name="android.intent.category.BROWSABLE" />
++                <data android:scheme="@string/rustore_pay_deeplink_scheme" />
++            </intent-filter>
+         </activity>
++
++        <!-- Pay SDK may contribute its own PayActivity. Keep singleTop when manifests are merged. -->
++        <activity
++            android:name="ru.rustore.sdk.pay.internal.presentation.ui.PayActivity"
++            android:exported="false"
++            android:launchMode="singleTop"
++            tools:replace="android:launchMode" />
++
+         <provider
+             android:name="androidx.core.content.FileProvider"
+             android:authorities="${applicationId}.fileprovider"
+diff -ruN rustore-base/app/src/main/java/ru/furniturecrm/app/CrmApp.kt rustore-src/app/src/main/java/ru/furniturecrm/app/CrmApp.kt
+--- rustore-base/app/src/main/java/ru/furniturecrm/app/CrmApp.kt	2026-09-01 16:47:14.000000000 +0000
++++ rustore-src/app/src/main/java/ru/furniturecrm/app/CrmApp.kt	2026-09-01 16:53:49.869464696 +0000
+@@ -54,8 +54,9 @@
+ private val RuFullDate = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale("ru"))
+ 
+ @Composable
+-fun FurnitureCrmApp(vm: AppViewModel, initialProjectId: Long? = null) {
++fun FurnitureCrmApp(vm: AppViewModel, licenseManager: RuStoreLicenseManager, initialProjectId: Long? = null) {
+     val state by vm.state.collectAsState()
++    val license by licenseManager.state.collectAsState()
+     var screenName by rememberSaveable { mutableStateOf(MainScreen.HOME.name) }
+     var detailId by rememberSaveable { mutableStateOf<Long?>(initialProjectId) }
+     var editId by rememberSaveable { mutableStateOf<Long?>(null) }
+@@ -105,6 +106,12 @@
+     MaterialTheme(colorScheme = colors, shapes = shapes) {
+         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+             when {
++                !license.canUseApp -> LicensePaywallScreen(
++                    license = license,
++                    vm = vm,
++                    onBuy = licenseManager::purchase,
++                    onRestore = { licenseManager.refreshPurchases(silent = false) },
++                )
+                 creating || editId != null -> {
+                     val project = editId?.let { id -> state.projects.firstOrNull { it.project.id == id }?.project }
+                     ProjectFormScreen(project, state.projects, onBack = { creating = false; editId = null }, onSave = { p ->
+@@ -127,7 +134,7 @@
+                     content = { current ->
+                         when (current) {
+-                            MainScreen.HOME -> DashboardScreen(state, onProject = { detailId = it }, onAdd = { creating = true }, onQueue = { screenName = MainScreen.QUEUE.name })
++                            MainScreen.HOME -> DashboardScreen(state, license, onBuy = licenseManager::purchase, onProject = { detailId = it }, onAdd = { creating = true }, onQueue = { screenName = MainScreen.QUEUE.name })
+                             MainScreen.PROJECTS -> ProjectsScreen(state.projects, onProject = { detailId = it }, onAdd = { creating = true })
+                             MainScreen.QUEUE -> QueueScreen(state, vm, onProject = { detailId = it })
+                             MainScreen.CALENDAR -> CalendarScreen(state, onProject = { detailId = it })
+@@ -173,7 +180,7 @@
+ }
+ 
+ @Composable
+-private fun DashboardScreen(state: AppUiState, onProject: (Long) -> Unit, onAdd: () -> Unit, onQueue: () -> Unit) {
++private fun DashboardScreen(state: AppUiState, license: LicenseUiState, onBuy: () -> Unit, onProject: (Long) -> Unit, onAdd: () -> Unit, onQueue: () -> Unit) {
+     val context = LocalContext.current
+     val active = state.projects.filter { it.project.status !in setOf(ProjectStatus.COMPLETED, ProjectStatus.CANCELLED) }
+     val kitchens = active.count { it.project.furnitureType == FurnitureType.KITCHEN }
+@@ -205,6 +212,9 @@
+             Text("Объекты • Монтаж • Деньги", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+             Text("Сегодня ${BusinessTime.today().format(RuFullDate)} • календарь телефона • ${BusinessTime.zoneLabel()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+         }
++        if (license.isTrial) {
++            item { TrialAccessBanner(license = license, onBuy = onBuy) }
++        }
+         item {
+             ElevatedCard(
+                 Modifier.fillMaxWidth(),
+diff -ruN rustore-base/app/src/main/java/ru/furniturecrm/app/LicensePolicy.kt rustore-src/app/src/main/java/ru/furniturecrm/app/LicensePolicy.kt
+--- rustore-base/app/src/main/java/ru/furniturecrm/app/LicensePolicy.kt	1970-01-01 00:00:00.000000000 +0000
++++ rustore-src/app/src/main/java/ru/furniturecrm/app/LicensePolicy.kt	2026-09-01 16:51:44.411151726 +0000
+@@ -0,0 +1,30 @@
++package ru.furniturecrm.app
++
++import kotlin.math.max
++
++/** Pure trial/licensing rules kept separate from Android and RuStore SDK for deterministic tests. */
++object LicensePolicy {
++    const val TRIAL_DAYS: Long = 3
++    const val DAY_MS: Long = 24L * 60L * 60L * 1000L
++    const val TRIAL_MS: Long = TRIAL_DAYS * DAY_MS
++
++    fun trustedNow(wallClockNowMs: Long, maxSeenWallClockMs: Long): Long =
++        max(wallClockNowMs, maxSeenWallClockMs)
++
++    fun evaluate(firstLaunchMs: Long, nowMs: Long, purchased: Boolean): LicenseAccess {
++        if (purchased) return LicenseAccess.Full
++        val end = firstLaunchMs + TRIAL_MS
++        val remaining = (end - nowMs).coerceAtLeast(0L)
++        return if (remaining > 0L) LicenseAccess.Trial(end, remaining) else LicenseAccess.Locked(end)
++    }
++}
++
++sealed interface LicenseAccess {
++    data object Full : LicenseAccess
++    data class Trial(val endsAtMs: Long, val remainingMs: Long) : LicenseAccess
++    data class Locked(val endedAtMs: Long) : LicenseAccess
++}
+diff -ruN rustore-base/app/src/main/java/ru/furniturecrm/app/LicenseUi.kt rustore-src/app/src/main/java/ru/furniturecrm/app/LicenseUi.kt
+--- rustore-base/app/src/main/java/ru/furniturecrm/app/LicenseUi.kt	1970-01-01 00:00:00.000000000 +0000
++++ rustore-src/app/src/main/java/ru/furniturecrm/app/LicenseUi.kt	2026-09-01 16:54:30.733860413 +0000
+@@ -0,0 +1,177 @@
++package ru.furniturecrm.app
++
++import androidx.activity.compose.rememberLauncherForActivityResult
++import androidx.activity.result.contract.ActivityResultContracts
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.outlined.CheckCircle
++import androidx.compose.material.icons.outlined.Lock
++import androidx.compose.material3.Button
++import androidx.compose.material3.ButtonDefaults
++import androidx.compose.material3.CircularProgressIndicator
++import androidx.compose.material3.ElevatedCard
++import androidx.compose.material3.Icon
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.OutlinedButton
++import androidx.compose.material3.Text
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.rememberCoroutineScope
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.style.TextAlign
++import androidx.compose.ui.unit.dp
++import kotlinx.coroutines.launch
++
++@Composable
++fun TrialAccessBanner(license: LicenseUiState, onBuy: () -> Unit) {
++    ElevatedCard(
++        modifier = Modifier.fillMaxWidth(),
++        shape = RoundedCornerShape(20.dp),
++    ) {
++        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
++            Text("Пробный доступ", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
++            Text(
++                "Осталось ${license.remainingText}. Затем — разовая покупка ${license.priceLabel}, без подписки.",
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
++            )
++            OutlinedButton(onClick = onBuy, enabled = !license.processing, modifier = Modifier.fillMaxWidth()) {
++                if (license.processing) {
++                    CircularProgressIndicator(Modifier.height(18.dp), strokeWidth = 2.dp)
++                } else {
++                    Text("Купить навсегда — ${license.priceLabel}")
++                }
++            }
++            license.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
++        }
++    }
++}
++
++@Composable
++fun LicensePaywallScreen(
++    license: LicenseUiState,
++    vm: AppViewModel,
++    onBuy: () -> Unit,
++    onRestore: () -> Unit,
++) {
++    val context = LocalContext.current
++    val scope = rememberCoroutineScope()
++    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
++        if (uri != null) scope.launch {
++            val text = vm.exportJson()
++            context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(text) }
++        }
++    }
++
++    Column(
++        Modifier
++            .fillMaxSize()
++            .verticalScroll(rememberScrollState())
++            .padding(horizontal = 22.dp, vertical = 28.dp),
++        horizontalAlignment = Alignment.CenterHorizontally,
++        verticalArrangement = Arrangement.Center,
++    ) {
++        Icon(
++            imageVector = Icons.Outlined.Lock,
++            contentDescription = null,
++            tint = MaterialTheme.colorScheme.primary,
++        )
++        Spacer(Modifier.height(18.dp))
++        Text(
++            "Пробный период закончился",
++            style = MaterialTheme.typography.headlineSmall,
++            fontWeight = FontWeight.Bold,
++            textAlign = TextAlign.Center,
++        )
++        Spacer(Modifier.height(8.dp))
++        Text(
++            "Разблокируй «Мастер Объект» навсегда одной покупкой. Никакой ежемесячной подписки.",
++            style = MaterialTheme.typography.bodyLarge,
++            color = MaterialTheme.colorScheme.onSurfaceVariant,
++            textAlign = TextAlign.Center,
++        )
++        Spacer(Modifier.height(18.dp))
++
++        ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp)) {
++            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
++                PaywallFeature("Все объекты, очередь и календарь")
++                PaywallFeature("Фото, финансы и напоминания")
++                PaywallFeature("Разовые выходные и быстрый расчёт")
++                PaywallFeature("Покупка один раз — доступ без срока")
++            }
++        }
++        Spacer(Modifier.height(18.dp))
++
++        Button(
++            onClick = onBuy,
++            enabled = !license.processing && license.configured,
++            modifier = Modifier.fillMaxWidth(),
++            shape = RoundedCornerShape(16.dp),
++        ) {
++            if (license.processing) {
++                CircularProgressIndicator(Modifier.height(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
++            } else {
++                Text("Разблокировать навсегда — ${license.priceLabel}", fontWeight = FontWeight.Bold)
++            }
++        }
++        Spacer(Modifier.height(8.dp))
++        OutlinedButton(
++            onClick = onRestore,
++            enabled = !license.processing && license.configured,
++            modifier = Modifier.fillMaxWidth(),
++            shape = RoundedCornerShape(16.dp),
++        ) {
++            Text("Восстановить покупку")
++        }
++
++        if (!license.configured) {
++            Spacer(Modifier.height(12.dp))
++            Text(
++                "Эта тестовая сборка ещё не привязана к карточке приложения в RuStore. После подстановки ID приложения кнопка оплаты станет рабочей.",
++                color = MaterialTheme.colorScheme.error,
++                textAlign = TextAlign.Center,
++                style = MaterialTheme.typography.bodySmall,
++            )
++        }
++        license.message?.let {
++            Spacer(Modifier.height(10.dp))
++            Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
++        }
++
++        Spacer(Modifier.height(22.dp))
++        Text(
++            "Оплата не списывается автоматически: после пробного периода пользователь сам подтверждает разовую покупку в RuStore.",
++            style = MaterialTheme.typography.bodySmall,
++            color = MaterialTheme.colorScheme.onSurfaceVariant,
++            textAlign = TextAlign.Center,
++        )
++        Spacer(Modifier.height(14.dp))
++        OutlinedButton(
++            onClick = { exportLauncher.launch("master-object-backup.json") },
++            modifier = Modifier.fillMaxWidth(),
++            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
++        ) {
++            Text("Экспортировать свои данные")
++        }
++    }
++}
++
++@Composable
++private fun PaywallFeature(text: String) {
++    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
++        Icon(Icons.Outlined.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
++        Text(text, modifier = Modifier.weight(1f))
++    }
++}
+diff -ruN rustore-base/app/src/main/java/ru/furniturecrm/app/MainActivity.kt rustore-src/app/src/main/java/ru/furniturecrm/app/MainActivity.kt
+--- rustore-base/app/src/main/java/ru/furniturecrm/app/MainActivity.kt	2026-09-01 16:47:14.000000000 +0000
++++ rustore-src/app/src/main/java/ru/furniturecrm/app/MainActivity.kt	2026-09-01 16:53:17.996169226 +0000
+@@ -1,5 +1,6 @@
+ package ru.furniturecrm.app
+ 
++import android.content.Intent
+ import android.os.Bundle
+ import androidx.activity.ComponentActivity
+ import androidx.activity.compose.setContent
+@@ -8,12 +9,26 @@
+ 
+ class MainActivity : ComponentActivity() {
+     private val vm: AppViewModel by viewModels()
++    private val licenseManager: RuStoreLicenseManager by lazy { RuStoreLicenseManager(this) }
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+         enableEdgeToEdge()
+         ReminderScheduler.schedule(this)
++        if (savedInstanceState == null) licenseManager.proceedIntent(intent)
+         val openProjectId = intent?.getLongExtra("projectId", -1L)?.takeIf { it > 0 }
+-        setContent { FurnitureCrmApp(vm, openProjectId) }
++        setContent { FurnitureCrmApp(vm, licenseManager, openProjectId) }
++    }
++
++    override fun onNewIntent(intent: Intent) {
++        super.onNewIntent(intent)
++        setIntent(intent)
++        licenseManager.proceedIntent(intent)
++        licenseManager.refreshPurchases(silent = true)
++    }
++
++    override fun onResume() {
++        super.onResume()
++        licenseManager.onResume()
+     }
+ }
+diff -ruN rustore-base/app/src/main/java/ru/furniturecrm/app/RuStoreLicenseManager.kt rustore-src/app/src/main/java/ru/furniturecrm/app/RuStoreLicenseManager.kt
+--- rustore-base/app/src/main/java/ru/furniturecrm/app/RuStoreLicenseManager.kt	1970-01-01 00:00:00.000000000 +0000
++++ rustore-src/app/src/main/java/ru/furniturecrm/app/RuStoreLicenseManager.kt	2026-09-01 16:53:01.918422620 +0000
+@@ -0,0 +1,196 @@
++package ru.furniturecrm.app
++
++import android.content.Context
++import android.content.Intent
++import android.os.SystemClock
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
++import ru.rustore.sdk.pay.RuStorePayClient
++import ru.rustore.sdk.pay.model.PreferredPurchaseType
++import ru.rustore.sdk.pay.model.ProductId
++import ru.rustore.sdk.pay.model.ProductPurchaseParams
++
++/**
++ * Owns the 3-day trial and the single non-consumable RuStore entitlement.
++ *
++ * The debug build never hard-locks the CRM (BuildConfig.ENFORCE_PAYWALL=false),
++ * so it can be tested before a RuStore Console app id exists. Release builds enforce it.
++ */
++class RuStoreLicenseManager(context: Context) {
++    private val appContext = context.applicationContext
++    private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
++
++    private val _state = MutableStateFlow(buildLocalState())
++    val state: StateFlow<LicenseUiState> = _state.asStateFlow()
++
++    val configured: Boolean
++        get() = BuildConfig.RUSTORE_CONSOLE_APP_ID.isNotBlank() && BuildConfig.RUSTORE_CONSOLE_APP_ID != "0"
++
++    init {
++        initializeFirstLaunch()
++        refreshPurchases(silent = true)
++    }
++
++    fun refreshPurchases(silent: Boolean = false) {
++        val localPurchased = prefs.getBoolean(KEY_PURCHASED, false)
++        if (!configured) {
++            _state.value = buildLocalState(
++                processing = false,
++                message = if (!silent && !localPurchased) "Оплата будет доступна после привязки приложения к RuStore." else null,
++            )
++            return
++        }
++
++        _state.value = buildLocalState(processing = true)
++        runCatching {
++            RuStorePayClient.instance.getPurchaseInteractor().getPurchases()
++                .addOnSuccessListener { purchases ->
++                    val found = purchases.any { purchase -> purchase.productId.value == BuildConfig.RUSTORE_PRODUCT_ID }
++                    prefs.edit().putBoolean(KEY_PURCHASED, found).apply()
++                    _state.value = buildLocalState(
++                        processing = false,
++                        message = if (!silent && !found) "Покупка не найдена в RuStore." else null,
++                    )
++                }
++                .addOnFailureListener { error ->
++                    // If this device already has a locally confirmed purchase, do not lock it merely because it is offline.
++                    _state.value = buildLocalState(
++                        processing = false,
++                        message = if (!silent) friendlyError(error) else null,
++                    )
++                }
++        }.onFailure { error ->
++            _state.value = buildLocalState(
++                processing = false,
++                message = if (!silent) friendlyError(error) else null,
++            )
++        }
++    }
++
++    fun purchase() {
++        if (!configured) {
++            _state.value = buildLocalState(
++                message = "Сначала нужно создать приложение в RuStore и подставить его ID в release-сборку."
++            )
++            return
++        }
++        _state.value = buildLocalState(processing = true, message = null)
++        val params = ProductPurchaseParams(
++            productId = ProductId(BuildConfig.RUSTORE_PRODUCT_ID),
++            quantity = null,
++            orderId = null,
++            developerPayload = null,
++            appUserId = null,
++            appUserEmail = null,
++        )
++        runCatching {
++            RuStorePayClient.instance.getPurchaseInteractor()
++                .purchase(params = params, preferredPurchaseType = PreferredPurchaseType.ONE_STEP)
++                .addOnSuccessListener {
++                    prefs.edit().putBoolean(KEY_PURCHASED, true).apply()
++                    _state.value = buildLocalState(processing = false, message = "Доступ открыт навсегда. Спасибо!")
++                    // Re-read RuStore state to make the local entitlement self-healing.
++                    refreshPurchases(silent = true)
++                }
++                .addOnFailureListener { error ->
++                    _state.value = buildLocalState(processing = false, message = friendlyError(error))
++                }
++        }.onFailure { error ->
++            _state.value = buildLocalState(processing = false, message = friendlyError(error))
++        }
++    }
++
++    /** Hand RuStore payment deeplinks back to Pay SDK. */
++    fun proceedIntent(intent: Intent?) {
++        if (!configured || intent == null) return
++        runCatching { RuStorePayClient.instance.getIntentInteractor().proceedIntent(intent) }
++    }
++
++    /** Refresh trusted wall clock and entitlement when the activity resumes. */
++    fun onResume() {
++        touchTrustedClock()
++        refreshPurchases(silent = true)
++    }
++
++    private fun initializeFirstLaunch() {
++        if (!prefs.contains(KEY_FIRST_LAUNCH)) {
++            prefs.edit()
++                .putLong(KEY_FIRST_LAUNCH, System.currentTimeMillis())
++                .putLong(KEY_MAX_SEEN_WALL, System.currentTimeMillis())
++                .putLong(KEY_FIRST_ELAPSED, SystemClock.elapsedRealtime())
++                .apply()
++        } else {
++            touchTrustedClock()
++        }
++        _state.value = buildLocalState()
++    }
++
++    private fun touchTrustedClock(): Long {
++        val wall = System.currentTimeMillis()
++        val seen = prefs.getLong(KEY_MAX_SEEN_WALL, wall)
++        val trusted = LicensePolicy.trustedNow(wall, seen)
++        if (trusted > seen) prefs.edit().putLong(KEY_MAX_SEEN_WALL, trusted).apply()
++        return trusted
++    }
++
++    private fun buildLocalState(processing: Boolean = false, message: String? = null): LicenseUiState {
++        val wall = System.currentTimeMillis()
++        val seen = prefs.getLong(KEY_MAX_SEEN_WALL, wall)
++        val now = LicensePolicy.trustedNow(wall, seen)
++        val first = prefs.getLong(KEY_FIRST_LAUNCH, wall)
++        val purchased = prefs.getBoolean(KEY_PURCHASED, false)
++        val access = LicensePolicy.evaluate(first, now, purchased)
++        return LicenseUiState(
++            access = access,
++            processing = processing,
++            configured = configured,
++            enforcePaywall = BuildConfig.ENFORCE_PAYWALL,
++            priceLabel = "199 ₽",
++            message = message,
++        )
++    }
++
++    private fun friendlyError(error: Throwable): String {
++        val raw = error.message.orEmpty()
++        return when {
++            raw.contains("cancel", ignoreCase = true) || raw.contains("отмен", ignoreCase = true) -> "Оплата отменена."
++            raw.isNotBlank() -> "Не удалось проверить оплату: $raw"
++            else -> "Не удалось связаться с RuStore. Проверь интернет и попробуй ещё раз."
++        }
++    }
++
++    companion object {
++        private const val PREFS = "master_object_license"
++        private const val KEY_FIRST_LAUNCH = "first_launch_ms"
++        private const val KEY_MAX_SEEN_WALL = "max_seen_wall_ms"
++        private const val KEY_FIRST_ELAPSED = "first_elapsed_ms"
++        private const val KEY_PURCHASED = "purchased_full_access"
++    }
++}
++
++data class LicenseUiState(
++    val access: LicenseAccess,
++    val processing: Boolean = false,
++    val configured: Boolean = false,
++    val enforcePaywall: Boolean = true,
++    val priceLabel: String = "199 ₽",
++    val message: String? = null,
++) {
++    val hasFullAccess: Boolean get() = access is LicenseAccess.Full
++    val isTrial: Boolean get() = access is LicenseAccess.Trial
++    val isLocked: Boolean get() = access is LicenseAccess.Locked
++    val canUseApp: Boolean get() = hasFullAccess || isTrial || !enforcePaywall
++
++    val remainingMs: Long get() = (access as? LicenseAccess.Trial)?.remainingMs ?: 0L
++    val remainingText: String
++        get() {
++            val totalMinutes = (remainingMs / 60_000L).coerceAtLeast(0L)
++            val days = totalMinutes / (24L * 60L)
++            val hours = (totalMinutes % (24L * 60L) + 59L) / 60L
++            return when {
++                days >= 1L -> "$days дн. ${hours.coerceAtMost(23)} ч."
++                hours >= 1L -> "$hours ч."
++                totalMinutes > 0L -> "$totalMinutes мин."
++                else -> "меньше минуты"
++            }
++        }
++}
+diff -ruN rustore-base/app/src/test/java/ru/furniturecrm/app/LicensePolicyTest.kt rustore-src/app/src/test/java/ru/furniturecrm/app/LicensePolicyTest.kt
+--- rustore-base/app/src/test/java/ru/furniturecrm/app/LicensePolicyTest.kt	1970-01-01 00:00:00.000000000 +0000
++++ rustore-src/app/src/test/java/ru/furniturecrm/app/LicensePolicyTest.kt	2026-09-01 16:51:44.412151725 +0000
+@@ -0,0 +1,31 @@
++package ru.furniturecrm.app
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class LicensePolicyTest {
++    @Test fun trialIsAvailableForThreeDays() {
++        val first = 1_000_000L
++        val access = LicensePolicy.evaluate(first, first + 2 * LicensePolicy.DAY_MS, purchased = false)
++        assertTrue(access is LicenseAccess.Trial)
++        assertEquals(LicensePolicy.DAY_MS, (access as LicenseAccess.Trial).remainingMs)
++    }
++
++    @Test fun trialLocksAtExactEnd() {
++        val first = 1_000_000L
++        assertTrue(LicensePolicy.evaluate(first, first + LicensePolicy.TRIAL_MS, false) is LicenseAccess.Locked)
++    }
++
++    @Test fun purchaseUnlocksAfterTrialForever() {
++        val first = 1_000_000L
++        assertTrue(LicensePolicy.evaluate(first, first + 500 * LicensePolicy.DAY_MS, true) is LicenseAccess.Full)
++    }
++
++    @Test fun movingPhoneClockBackCannotExtendSeenTime() {
++        assertEquals(2_000L, LicensePolicy.trustedNow(1_000L, 2_000L))
++        assertEquals(3_000L, LicensePolicy.trustedNow(3_000L, 2_000L))
++    }
++}
+diff -ruN rustore-base/settings.gradle.kts rustore-src/settings.gradle.kts
+--- rustore-base/settings.gradle.kts	2026-09-01 16:47:14.000000000 +0000
++++ rustore-src/settings.gradle.kts	2026-09-01 16:52:08.575515504 +0000
+@@ -9,6 +9,7 @@
+     repositories {
+         google()
+         mavenCentral()
++        maven { url = uri("https://nexus-external.vkteam.ru/repository/maven-rustore-exposed/") }
+     }
+ }
+ rootProject.name = "FurnitureInstallerCRM"
