@@ -1,3 +1,4 @@
+# RuStore monetization validation build: resValues enabled
 name: Build Master Object RuStore Paywall
 
 on:
