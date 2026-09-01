@@ -113,25 +113,11 @@ jobs:
       - name: Align one-off day-off regression with phone calendar
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt')
-          s = p.read_text()
-          old = '''            listOf(Project(id=1,title="Монтаж",clientName="A",plannedStart=LocalDate.of(2026,9,5),durationHalfDays=4)),
-            workDays,exceptions,LocalDate.of(2026,9,5),0
-        )
-        val item=result.items.single()
-        assertEquals(LocalDate.of(2026,9,5),item.startDate)'''
-          new = '''            listOf(Project(id=1,title="Монтаж",clientName="A",plannedStart=LocalDate.of(2026,9,6),durationHalfDays=4)),
-            workDays,exceptions,LocalDate.of(2026,9,6),0
-        )
-        val item=result.items.single()
-        assertEquals(LocalDate.of(2026,9,6),item.startDate)'''
-          if old not in s:
-              raise SystemExit('One-off day-off regression target not found')
-          p.write_text(s.replace(old, new, 1))
-          PY
-          grep -A10 -F 'oneOffDayOffIsSkippedWithoutChangingOtherMondays' app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt
+          TEST=app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt
+          sed -i 's/plannedStart=LocalDate.of(2026,9,5),durationHalfDays=4/plannedStart=LocalDate.of(2026,9,6),durationHalfDays=4/' "$TEST"
+          sed -i 's/workDays,exceptions,LocalDate.of(2026,9,5),0/workDays,exceptions,LocalDate.of(2026,9,6),0/' "$TEST"
+          sed -i '0,/assertEquals(LocalDate.of(2026,9,5),item.startDate)/s//assertEquals(LocalDate.of(2026,9,6),item.startDate)/' "$TEST"
+          grep -A10 -F 'oneOffDayOffIsSkippedWithoutChangingOtherMondays' "$TEST"
 
       - name: Verify corrected source invariants
         working-directory: build-src/FurnitureInstallerCRM-Android
