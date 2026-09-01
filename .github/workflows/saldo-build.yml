@@ -25,20 +25,32 @@ jobs:
           test -f Saldo/settings.gradle.kts
           test -f Saldo/app/build.gradle.kts
 
-      - name: Apply verified source fix
+      - name: Apply verified source fixes
         shell: python
         run: |
           from pathlib import Path
           p = Path('Saldo/app/src/main/java/com/saldo/app/ui/Screens.kt')
           lines = p.read_text().splitlines()
-          marker = 'Row { ThemeMode.entries.forEach { mode -> IconButton(onClick = { viewModel.setTheme(mode) })'
-          indexes = [i for i, line in enumerate(lines) if marker in line]
+
+          theme_marker = 'Row { ThemeMode.entries.forEach { mode -> IconButton(onClick = { viewModel.setTheme(mode) })'
+          indexes = [i for i, line in enumerate(lines) if theme_marker in line]
           if len(indexes) != 1:
               raise SystemExit(f'Expected exactly one theme row, got {len(indexes)}')
           i = indexes[0]
-          if i + 1 < len(lines) and lines[i + 1].strip() == '}':
-              raise SystemExit('Source already patched')
           lines.insert(i + 1, '                    }')
+
+          settings_marker = 'val settings by viewModel.settings.collectAsStateWithLifecycle()'
+          debt_start = next(i for i, line in enumerate(lines) if 'private fun DebtDetailScreen' in line)
+          settings_i = next(i for i in range(debt_start, min(debt_start + 20, len(lines))) if settings_marker in lines[i])
+          lines.insert(settings_i + 1, '    val context = LocalContext.current')
+
+          for i in range(debt_start, min(debt_start + 80, len(lines))):
+              if 'pickDate(LocalContext.current, d.dueDate ?: System.currentTimeMillis())' in lines[i]:
+                  lines[i] = lines[i].replace('pickDate(LocalContext.current, d.dueDate ?: System.currentTimeMillis())', 'pickDate(context, d.dueDate ?: System.currentTimeMillis())')
+                  break
+          else:
+              raise SystemExit('Debt date picker source block not found')
+
           p.write_text('\n'.join(lines) + '\n')
 
       - name: Set up Java 17
