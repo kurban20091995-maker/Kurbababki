@@ -1,8 +1,8 @@
-name: Build Raschet KU APK
+name: Build Raschet KU Old Design APK
 
 on:
   push:
-    branches: [ "tmp-raschet-ku-build" ]
+    branches: [ "tmp-raschet-ku-oldstyle" ]
   workflow_dispatch:
 
 permissions:
@@ -39,38 +39,64 @@ jobs:
           done
           file raschet-ku/app/src/main/res/mipmap-*/ic_launcher.png
 
-      - name: Verify formulas
+      - name: Verify packaged old design and formulas
         run: |
           python3 - <<'PY'
+          from pathlib import Path
           import math
+          html=Path('raschet-ku/app/src/main/assets/index.html').read_text(encoding='utf-8')
+          assert '<h1>Расчет к.у.</h1>' in html
+          expected=[
+            '1. Основные углы',
+            '2. Настройки / результат расчёта реза',
+            '3. Левый / правый рез',
+            '4. Вычислить угол установки по размерам'
+          ]
+          positions=[html.index(x) for x in expected]
+          assert positions == sorted(positions)
+          assert '--bg:#0d0f12' in html and '--accent:#d49a42' in html
           C=90.0; S=45.0
           m=math.degrees(math.atan(math.sin(math.radians(S))/math.tan(math.radians(C)/2)))
           b=math.degrees(math.asin(math.cos(math.radians(S))*math.cos(math.radians(C)/2)))
           hp=math.degrees(math.atan(100/100))
           lp=math.degrees(math.asin(100/141.42))
-          print('90/45 miter/bevel:', m, b)
-          print('H+P:', hp, 'L+P:', lp)
           assert abs(m-35.26438968) < 0.001
           assert abs(b-30.0) < 0.001
           assert abs(hp-45.0) < 0.001
           assert abs(lp-45.00054948) < 0.01
+          print('HTML old design/order OK; formulas OK:', m,b,hp,lp)
           PY
 
-      - name: Build APK
+      - name: Build unsigned release APK
         working-directory: raschet-ku
-        run: gradle --no-daemon clean assembleDebug
+        run: gradle --no-daemon clean assembleRelease
 
-      - name: Verify APK structure, metadata, permissions, alignment and signature
+      - name: Zipalign and sign v1 v2 v3
         run: |
           set -euxo pipefail
-          APK="$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/debug/app-debug.apk"
           BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-          echo "Using build-tools: $BT"
-          test -f "$APK"
+          UNSIGNED="$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/release/app-release-unsigned.apk"
+          ALIGNED="$GITHUB_WORKSPACE/Raschet-KU-OLD-DESIGN-aligned.apk"
+          FINAL="$GITHUB_WORKSPACE/Raschet-KU-OLD-DESIGN.apk"
+          test -f "$UNSIGNED"
+          "$BT/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          keytool -genkeypair -v -keystore /tmp/raschet-ku-oldstyle.jks -storepass changeit -keypass changeit -alias raschetku -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Raschet KU, O=Local Build, C=RU"
+          "$BT/apksigner" sign --ks /tmp/raschet-ku-oldstyle.jks --ks-key-alias raschetku --ks-pass pass:changeit --key-pass pass:changeit --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out "$FINAL" "$ALIGNED"
+
+      - name: Verify APK structure metadata permissions alignment signature
+        run: |
+          set -euxo pipefail
+          APK="$GITHUB_WORKSPACE/Raschet-KU-OLD-DESIGN.apk"
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
           unzip -t "$APK" >/dev/null
           unzip -l "$APK" | grep -q 'classes.dex'
+          unzip -l "$APK" | grep -q 'assets/index.html'
           "$BT/aapt2" dump badging "$APK" | tee /tmp/badging.txt
-          grep -Fq "package: name='ru.raschet.ku'" /tmp/badging.txt
+          grep -Fq "package: name='ru.raschet.ku.oldstyle'" /tmp/badging.txt
+          grep -Fq "versionCode='5'" /tmp/badging.txt
+          grep -Fq "versionName='5.0.0'" /tmp/badging.txt
+          grep -Fq "minSdkVersion:'21'" /tmp/badging.txt
+          grep -Fq "targetSdkVersion:'35'" /tmp/badging.txt
           grep -Fq "application-label:'Расчет к.у.'" /tmp/badging.txt
           grep -q 'application-icon-' /tmp/badging.txt
           "$BT/aapt2" dump permissions "$APK" | tee /tmp/permissions.txt
@@ -81,6 +107,7 @@ jobs:
           "$BT/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/signature.txt
           grep -q 'Verified using v1 scheme (JAR signing): true' /tmp/signature.txt
           grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' /tmp/signature.txt
+          grep -q 'Verified using v3 scheme (APK Signature Scheme v3): true' /tmp/signature.txt
 
       - name: Enable KVM
         run: |
@@ -88,7 +115,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Install and launch on Android emulator
+      - name: Install launch and run WebView self-test on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 29
@@ -97,24 +124,25 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            adb install "$GITHUB_WORKSPACE/raschet-ku/app/build/outputs/apk/debug/app-debug.apk"
-            adb shell pm path ru.raschet.ku
-            adb shell am force-stop ru.raschet.ku
-            adb shell am start -W -n ru.raschet.ku/.MainActivity > /tmp/launch.txt
+            adb logcat -c
+            adb install "$GITHUB_WORKSPACE/Raschet-KU-OLD-DESIGN.apk"
+            adb shell pm path ru.raschet.ku.oldstyle
+            adb shell am force-stop ru.raschet.ku.oldstyle
+            adb shell am start -W -n ru.raschet.ku.oldstyle/.MainActivity > /tmp/launch.txt
             cat /tmp/launch.txt
             grep -q 'Status: ok' /tmp/launch.txt
-            sleep 2
-            adb shell dumpsys activity activities | grep 'ru.raschet.ku' > /tmp/activity.txt
+            sleep 4
+            adb shell dumpsys activity activities | grep 'ru.raschet.ku.oldstyle' > /tmp/activity.txt
             cat /tmp/activity.txt
             test -s /tmp/activity.txt
-
-      - name: Copy final APK
-        run: cp raschet-ku/app/build/outputs/apk/debug/app-debug.apk 'Raschet-KU-FINAL.apk'
+            adb logcat -d | grep 'RaschetKU.*SELF_TEST=true' > /tmp/selftest.txt
+            cat /tmp/selftest.txt
+            test -s /tmp/selftest.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Raschet-KU-FINAL
-          path: Raschet-KU-FINAL.apk
+          name: Raschet-KU-OLD-DESIGN
+          path: Raschet-KU-OLD-DESIGN.apk
           if-no-files-found: error
           retention-days: 7

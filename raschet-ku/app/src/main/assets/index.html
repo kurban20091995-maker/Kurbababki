@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+<meta name="theme-color" content="#111418" />
+<title>Расчет к.у.</title>
+<style>
+:root{--bg:#0d0f12;--card:#171a1f;--card2:#1d2127;--text:#f5f6f7;--muted:#a9b0b8;--accent:#d49a42;--line:#30353d;--danger:#ff7474;--ok:#8fd49c}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Roboto,Arial,sans-serif}body{min-height:100vh}.wrap{max-width:720px;margin:auto;padding:18px 14px 34px}.hero{padding:8px 4px 15px}.hero h1{margin:0;font-size:27px;letter-spacing:.2px}.hero p{color:var(--muted);margin:6px 0 0;font-size:14px;line-height:1.35}.card{background:var(--card);border:1px solid #232830;border-radius:18px;padding:16px;margin:0 0 14px;box-shadow:0 8px 30px rgba(0,0,0,.2)}.title{font-size:12px;color:var(--accent);font-weight:800;letter-spacing:.8px;margin:0 0 13px;text-transform:uppercase}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.field{margin:0 0 12px}.field label{display:block;color:var(--muted);font-size:13px;margin:0 0 6px}.input{width:100%;background:#0f1216;color:var(--text);border:1px solid var(--line);border-radius:12px;font-size:19px;padding:13px 12px;outline:none}.input:focus{border-color:var(--accent)}.presets{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:2px}.chip,.btn,.seg button{border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:12px;padding:12px 9px;font-weight:700;font-size:14px}.chip:active,.seg button:active{transform:scale(.98)}.btn{width:100%;background:var(--accent);border:0;color:#141414;padding:15px 12px;font-size:15px;margin-top:4px}.btn.secondary{background:#252a31;color:var(--text);border:1px solid var(--line)}.result{font-size:18px;font-weight:800;text-align:center;padding:7px 0 1px}.hint{font-size:12px;line-height:1.4;color:var(--muted);margin:10px 0 0}.divider{height:1px;background:var(--line);margin:17px 0}.bigpair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.big{background:#101318;border:1px solid var(--line);border-radius:15px;padding:14px}.big span{display:block;color:var(--muted);font-size:12px}.big strong{font-size:31px;display:block;margin-top:4px}.nested{margin-top:10px;background:#101318;border-radius:12px;padding:12px;color:var(--muted);font-size:13px}.nested b{color:var(--text)}.formula{color:var(--muted);font-size:13px;line-height:1.45;margin-top:12px}.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}.seg button.active{background:var(--accent);color:#121212;border-color:var(--accent)}.cutbox{background:#101318;border:1px solid var(--line);border-radius:15px;padding:14px;margin-top:10px}.cuthead{font-weight:800;font-size:14px;margin-bottom:7px}.cutline{font-size:16px;line-height:1.45}.cutline b{color:var(--accent)}.schematic{height:160px;background:#101318;border:1px solid var(--line);border-radius:15px;margin:12px 0 8px;position:relative;overflow:hidden}.fence{position:absolute;top:23px;left:12%;right:12%;height:6px;background:#6c747e;border-radius:4px}.fence:before{content:'УПОР';position:absolute;top:-20px;left:4px;font-size:10px;color:var(--muted)}.piece{position:absolute;left:15%;right:15%;top:70px;height:45px;border:2px solid var(--accent);background:rgba(212,154,66,.08);transform:skewX(-12deg)}.blade{position:absolute;top:48px;left:50%;width:4px;height:86px;background:#f3f3f3;transform-origin:50% 0;border-radius:3px}.arrow{position:absolute;bottom:9px;left:12px;right:12px;text-align:center;color:var(--muted);font-size:11px}.warn{padding:0 4px;color:var(--muted);font-size:12px;line-height:1.45}.err{display:none;background:#481f24;color:#ffd7db;border:1px solid #7c323a;border-radius:11px;padding:10px 12px;margin-top:10px;font-size:13px}.ok{color:var(--ok)}.tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 14px}.tab{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:13px;padding:13px 10px;font-weight:800;font-size:14px}.tab.active{background:var(--accent);color:#151515;border-color:var(--accent)}.page.hidden{display:none}.instruction h2{font-size:18px;margin:0 0 10px}.instruction h3{font-size:15px;margin:18px 0 7px;color:var(--accent)}.instruction p,.instruction li{font-size:14px;line-height:1.5;color:#d4d8dd}.instruction ol,.instruction ul{padding-left:22px;margin:8px 0}.measureBox{background:#101318;border:1px solid var(--line);border-radius:14px;padding:13px;margin:10px 0}.measureBox b{color:var(--accent)}.miniExample{background:#20252c;border-radius:12px;padding:12px;margin-top:10px;font-size:13px;line-height:1.5}.safety{border-left:4px solid var(--accent);padding:10px 12px;background:#101318;border-radius:0 12px 12px 0;margin-top:12px;font-size:13px;line-height:1.45}@media(max-width:420px){.big strong{font-size:27px}.row{gap:8px}.wrap{padding-left:11px;padding-right:11px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero"><h1>Расчет к.у.</h1><p>Комбинированный рез кухонного карниза: поворот стола + наклон диска.</p></div>
+
+  <div class="tabs"><button id="calcTab" class="tab active" onclick="showPage('calc')">Калькулятор</button><button id="guideTab" class="tab" onclick="showPage('guide')">Инструкция</button></div>
+
+  <div id="calcPage" class="page">
+<section class="card">
+    <div class="title">1. Основные углы</div>
+    <div class="row">
+      <div class="field"><label>Угол стены / кухни C, °</label><input id="corner" class="input" inputmode="decimal" value="90"></div>
+      <div class="field"><label>Угол установки карниза S, °</label><input id="spring" class="input" inputmode="decimal" value="45"></div>
+    </div>
+    <div class="presets"><button class="chip" onclick="setSpring(38)">38°</button><button class="chip" onclick="setSpring(45)">45°</button><button class="chip" onclick="setSpring(52)">52°</button></div>
+  </section>
+
+<button class="btn" onclick="calculate()">РАССЧИТАТЬ РЕЗ</button>
+  <div id="err" class="err"></div>
+
+<section class="card" style="margin-top:14px">
+    <div class="title">2. Настройки / результат расчёта реза</div>
+    <div class="bigpair">
+      <div class="big"><span>Поворот стола</span><strong id="miter">35,26°</strong></div>
+      <div class="big"><span>Наклон диска</span><strong id="bevel">30,00°</strong></div>
+    </div>
+    <div class="nested">Если карниз зафиксирован на пиле <b>в рабочем положении</b>: <span id="nested">поворот 45,00° · наклон 0°</span></div>
+    <div id="formula" class="formula"></div>
+  </section>
+
+<section class="card">
+    <div class="title">3. Левый / правый рез</div>
+    <p class="hint" style="margin-top:0;color:var(--text)"><b>Положение для схемы:</b> карниз лежит плашмя, широкая тыльная сторона на столе, ВЕРХ карниза — к упору торцовки.</p>
+    <div class="seg"><button id="insideBtn" class="active" onclick="setJoint('inside')">Внутренний угол</button><button id="outsideBtn" onclick="setJoint('outside')">Наружный угол</button></div>
+    <div class="seg"><button id="leftBtn" class="active" onclick="setSide('left')">Левая деталь</button><button id="rightBtn" onclick="setSide('right')">Правая деталь</button></div>
+    <div class="schematic"><div class="fence"></div><div class="piece"></div><div id="blade" class="blade"></div><div id="arrow" class="arrow"></div></div>
+    <div class="cutbox"><div id="cutHead" class="cuthead"></div><div id="cutLine" class="cutline"></div></div>
+  </section>
+
+<section class="card">
+    <div class="title">4. Вычислить угол установки по размерам</div>
+    <div style="font-weight:800;margin-bottom:8px">Способ A · вертикальная высота + вылет</div>
+    <div class="row">
+      <div class="field"><label>Высота H, мм</label><input id="height" class="input" inputmode="decimal" value="100"></div>
+      <div class="field"><label>Вылет P, мм</label><input id="offsetA" class="input" inputmode="decimal" value="100"></div>
+    </div>
+    <button class="btn secondary" onclick="springFromHP()">Вычислить по H + P</button>
+    <div id="springA" class="result">Угол установки: 45,00°</div>
+    <p class="hint">H — вертикальное расстояние между нижней и верхней точкой установки. P — перпендикулярный вылет карниза от вертикальной стены. Формула: S = arctan(P / H).</p>
+    <div class="divider"></div>
+    <div style="font-weight:800;margin-bottom:8px">Способ B · длина карниза по наклонной + вылет</div>
+    <div class="row">
+      <div class="field"><label>Длина по наклонной L, мм</label><input id="length" class="input" inputmode="decimal" value="141,42"></div>
+      <div class="field"><label>Вылет P, мм</label><input id="offsetB" class="input" inputmode="decimal" value="100"></div>
+    </div>
+    <button class="btn secondary" onclick="springFromLP()">Вычислить по L + P</button>
+    <div id="springB" class="result">Угол установки: 45,00°</div>
+    <p class="hint">L измеряй по наклонной между теми же двумя точками прилегания. P должен быть меньше L. Формула: S = arcsin(P / L).</p>
+  </section>
+
+<p class="warn">Перед чистовым резом проверь настройку на обрезке. Реальный угол стены и профиль карниза часто отличаются от номинальных. Направление наклона диска также может обозначаться иначе на разных моделях торцовок.</p>
+  </div>
+
+  <div id="guidePage" class="page hidden instruction">
+    <section class="card">
+      <div class="title">Инструкция · с чего начать</div>
+      <h2>Как получить правильные углы торцовки</h2>
+      <ol>
+        <li>Измерь <b>реальный угол кухни/стены C</b>. Не считай его автоматически 90° — на объекте он часто отличается.</li>
+        <li>Определи <b>угол установки карниза S</b>: введи его вручную либо используй <b>пункт 4</b> — H + P или L + P.</li>
+        <li>Нажми <b>«РАССЧИТАТЬ РЕЗ»</b>. Приложение покажет одновременно поворот стола и наклон диска.</li>
+        <li>Выбери внутренний/наружный угол и левую/правую деталь. Ниже появится направление поворота и наклона.</li>
+        <li>Сначала сделай контрольный рез на обрезке и только потом режь чистовой карниз.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <div class="title">Как измерить наклон карниза</div>
+      <h3>Способ A — H + P</h3>
+      <div class="measureBox"><b>H</b> — вертикальная высота между нижней и верхней точкой установки карниза.<br><b>P</b> — насколько карниз выступает от вертикальной плоскости стены/фасада по горизонтали.</div>
+      <p>Введи оба размера в миллиметрах и нажми «Вычислить по H + P». Формула: <b>S = arctan(P / H)</b>.</p>
+      <div class="miniExample"><b>Пример:</b> H = 100 мм, P = 100 мм → угол установки S = 45,00°.</div>
+
+      <h3>Способ B — L + P</h3>
+      <div class="measureBox"><b>L</b> — расстояние по самому наклонному профилю между теми же точками.<br><b>P</b> — горизонтальный вылет от стены.</div>
+      <p>Нажми «Вычислить по L + P». Формула: <b>S = arcsin(P / L)</b>. Вылет P обязательно должен быть меньше L.</p>
+      <div class="miniExample"><b>Пример:</b> L = 141,42 мм, P = 100 мм → S ≈ 45,00°.</div>
+    </section>
+
+    <section class="card">
+      <div class="title">Как положить карниз на торцовку</div>
+      <p>Для комбинированного реза из этого калькулятора карниз кладётся <b>плашмя</b>: широкая тыльная сторона лежит на столе торцовки, а <b>верх карниза направлен к упору</b>.</p>
+      <p>После расчёта одновременно выставляются:</p>
+      <ul><li><b>поворот стола</b> — miter;</li><li><b>наклон диска</b> — bevel.</li></ul>
+      <p>В <b>пункте 3 «Левый / правый рез»</b> выбери тип угла и нужную деталь — приложение напишет направление: вправо или влево.</p>
+      <div class="safety"><b>Важно:</b> обозначения «наклон влево/вправо» относятся к положению оператора перед торцовкой. У некоторых моделей шкала или конструкция односторонняя, поэтому перед чистовым резом обязательно проверь на обрезке.</div>
+    </section>
+
+    <section class="card">
+      <div class="title">Если карниз режется не плашмя</div>
+      <p>Если карниз удаётся надёжно установить на торцовке точно в том положении, в котором он стоит на шкафу, комбинированный расчёт обычно не нужен: приложение дополнительно показывает строку <b>«в рабочем положении»</b> — поворот и наклон 0°.</p>
+      <p>Не режь деталь, удерживая её рукой в неустойчивом положении. Используй упоры/фиксацию и соблюдай инструкцию производителя торцовочной пилы.</p>
+    </section>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+function showPage(v){const calc=v==='calc';$('calcPage').classList.toggle('hidden',!calc);$('guidePage').classList.toggle('hidden',calc);$('calcTab').classList.toggle('active',calc);$('guideTab').classList.toggle('active',!calc);window.scrollTo(0,0)}
+let joint='inside',side='left',lastM=35.2643897,lastB=30;
+function num(id){const v=$(id).value.trim().replace(',','.'); const n=Number(v); if(!Number.isFinite(n)) throw new Error('Введите корректное число'); return n}
+function fmt(n){return n.toFixed(2).replace('.',',')}
+function showErr(s){const e=$('err');e.textContent=s;e.style.display='block'} function clearErr(){$('err').style.display='none'}
+function setSpring(x){$('spring').value=String(x); $('springA').textContent='Угол установки: '+fmt(x)+'°'; $('springB').textContent='Угол установки: '+fmt(x)+'°'; calculate()}
+function springFromHP(){try{clearErr();const h=num('height'),p=num('offsetA');if(h<=0)throw new Error('Высота H должна быть больше 0 мм');if(p<0)throw new Error('Вылет P не может быть отрицательным');const s=Math.atan(p/h)*180/Math.PI;if(s>=90)throw new Error('Получился недопустимый угол');$('spring').value=fmt(s);$('springA').textContent='Угол установки: '+fmt(s)+'°';$('springB').textContent='Угол установки: '+fmt(s)+'°';calculate()}catch(e){showErr(e.message)}}
+function springFromLP(){try{clearErr();const l=num('length'),p=num('offsetB');if(l<=0)throw new Error('Длина L должна быть больше 0 мм');if(p<0)throw new Error('Вылет P не может быть отрицательным');if(p>=l)throw new Error('Вылет P должен быть меньше длины L');const s=Math.asin(p/l)*180/Math.PI;$('spring').value=fmt(s);$('springB').textContent='Угол установки: '+fmt(s)+'°';$('springA').textContent='Угол установки: '+fmt(s)+'°';calculate()}catch(e){showErr(e.message)}}
+function calculate(){try{clearErr();const c=num('corner'),s=num('spring');if(c<=0||c>=180)throw new Error('Угол стены должен быть больше 0° и меньше 180°');if(s<0||s>=90)throw new Error('Угол установки должен быть от 0° до 89,99°');const cr=c*Math.PI/180,sr=s*Math.PI/180;const m=Math.atan(Math.sin(sr)/Math.tan(cr/2))*180/Math.PI;let a=Math.cos(sr)*Math.cos(cr/2);a=Math.max(-1,Math.min(1,a));const b=Math.asin(a)*180/Math.PI;const n=(180-c)/2;lastM=m;lastB=b;$('miter').textContent=fmt(m)+'°';$('bevel').textContent=fmt(b)+'°';$('nested').textContent='поворот '+fmt(n)+'° · наклон 0°';$('formula').textContent='Для угла стены '+fmt(c)+'° и установки карниза '+fmt(s)+'° при резе плашмя одновременно выставь поворот '+fmt(m)+'° и наклон '+fmt(b)+'°.';updateGuide()}catch(e){showErr(e.message)}}
+function setJoint(v){joint=v;$('insideBtn').classList.toggle('active',v==='inside');$('outsideBtn').classList.toggle('active',v==='outside');updateGuide()}
+function setSide(v){side=v;$('leftBtn').classList.toggle('active',v==='left');$('rightBtn').classList.toggle('active',v==='right');updateGuide()}
+function updateGuide(){const inside=joint==='inside',left=side==='left';let tableRight,bevelLeft,keep=left?'ЛЕВУЮ':'ПРАВУЮ';if(inside&&left){tableRight=true;bevelLeft=true}else if(inside&&!left){tableRight=false;bevelLeft=false}else if(!inside&&left){tableRight=false;bevelLeft=false}else{tableRight=true;bevelLeft=true}const j=inside?'ВНУТРЕННИЙ':'НАРУЖНЫЙ',s=left?'ЛЕВАЯ':'ПРАВАЯ';$('cutHead').textContent=j+' УГОЛ · '+s+' ДЕТАЛЬ';$('cutLine').innerHTML='Стол <b>'+(tableRight?'ВПРАВО':'ВЛЕВО')+' '+fmt(lastM)+'°</b><br>Диск <b>'+(bevelLeft?'ВЛЕВО':'ВПРАВО')+' '+fmt(lastB)+'°</b><br>Сохранить <b>'+keep+' часть</b>';$('blade').style.transform='rotate('+(bevelLeft?-18:18)+'deg)';$('arrow').textContent='стол '+(tableRight?'→':'←')+' '+fmt(lastM)+'° · диск '+(bevelLeft?'←':'→')+' '+fmt(lastB)+'°'}
+function near(a,b,t){return Math.abs(a-b)<=t}
+function selfTest(){
+  try{
+    const titles=[...document.querySelectorAll('#calcPage .title')].map(x=>x.textContent.trim());
+    if(titles.length<4 || !titles[0].startsWith('1.') || !titles[1].startsWith('2.') || !titles[2].startsWith('3.') || !titles[3].startsWith('4.')) return false;
+    if(document.querySelector('.hero h1').textContent.trim()!=='Расчет к.у.') return false;
+    const c=90,s=45,cr=c*Math.PI/180,sr=s*Math.PI/180;
+    const m=Math.atan(Math.sin(sr)/Math.tan(cr/2))*180/Math.PI;
+    const b=Math.asin(Math.cos(sr)*Math.cos(cr/2))*180/Math.PI;
+    if(!near(m,35.26438968,.001) || !near(b,30,.001)) return false;
+    $('height').value='100'; $('offsetA').value='100'; springFromHP();
+    if(!near(Number($('spring').value.replace(',','.')),45,.01)) return false;
+    $('length').value='141,42'; $('offsetB').value='100'; springFromLP();
+    if(!near(Number($('spring').value.replace(',','.')),45,.01)) return false;
+    setJoint('outside'); setSide('right');
+    if(!$('cutLine').textContent.includes('Сохранить ПРАВУЮ часть')) return false;
+    setJoint('inside'); setSide('left');
+    $('corner').value='90'; $('spring').value='45'; calculate();
+    if(!$('guidePage') || !$('guideTab')) return false;
+    return true;
+  }catch(e){return false}
+}
+calculate();
+</script>
+</body></html>
