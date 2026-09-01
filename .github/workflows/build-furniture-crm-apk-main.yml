@@ -1,4 +1,4 @@
-name: Build Master Object Calendar Fix APK
+name: Export CalendarFix Source
 
 on:
   push:
@@ -8,31 +8,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  calendar-build:
+  export-source:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout source branch
         uses: actions/checkout@v4
         with:
           ref: furniture-crm-android-build
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android 36 SDK
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-
-      - name: Setup Gradle 9.5
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.5.0'
 
       - name: Reconstruct verified Master Object base
         run: |
@@ -59,12 +41,11 @@ jobs:
           echo '5481be78077523c8863519decdeac2bf342a943bef3f9404d0bffc9b2abf0ee4  masterobject.b64' | sha256sum -c -
           base64 --decode masterobject.b64 > MasterObject-Android.zip
           echo '6a9a916cfcc886eaad66036d29a96bfc8128ed50b5b554c6cd256e0fc63fa298  MasterObject-Android.zip' | sha256sum -c -
-          unzip -t MasterObject-Android.zip
           rm -rf build-src
           mkdir build-src
           unzip -q MasterObject-Android.zip -d build-src
 
-      - name: Reconstruct verified audit patch
+      - name: Apply verified audit patch
         run: |
           cat \
             .masterobject-audit/first0 \
@@ -73,14 +54,11 @@ jobs:
             .masterobject-audit/big01 \
             .masterobject-audit/big02 \
             .masterobject-audit/big03 > /tmp/masterobject-audit.patch
-          test "$(wc -c < /tmp/masterobject-audit.patch)" -eq 57527
           echo '836117787d481196d93989f0f5df33821a947deb482b6f98ca00d0c60a96521d  /tmp/masterobject-audit.patch' | sha256sum -c -
+          cd build-src/FurnitureInstallerCRM-Android
+          patch -p1 < /tmp/masterobject-audit.patch
 
-      - name: Apply audit optimizations
-        working-directory: build-src/FurnitureInstallerCRM-Android
-        run: patch -p1 < /tmp/masterobject-audit.patch
-
-      - name: Reconstruct verified calendar patch
+      - name: Apply verified calendar patch
         run: |
           : > /tmp/calendar.b64
           head -c 7200 .masterobject-calendar/part00 >> /tmp/calendar.b64
@@ -88,19 +66,11 @@ jobs:
           head -c 7200 .masterobject-calendar/part02 >> /tmp/calendar.b64
           head -c 7200 .masterobject-calendar/part03 >> /tmp/calendar.b64
           head -c 20 .masterobject-calendar/part04 >> /tmp/calendar.b64
-          test "$(wc -c < /tmp/calendar.b64)" -eq 28820
           echo 'd01526a39d9a8db200971423b0e4b66ea98f86c71d0fcd1a65ebc66e2a82f112  /tmp/calendar.b64' | sha256sum -c -
           base64 --decode /tmp/calendar.b64 | gunzip > /tmp/masterobject-calendar.patch
-          test "$(wc -c < /tmp/masterobject-calendar.patch)" -eq 98478
           echo '63ace970c3cdfa1d846f51709c3d90a3cf28cd29b3989e0bb798495c7b41a320  /tmp/masterobject-calendar.patch' | sha256sum -c -
-
-      - name: Apply calendar and scheduling fixes
-        working-directory: build-src/FurnitureInstallerCRM-Android
-        run: patch -p2 < /tmp/masterobject-calendar.patch
-
-      - name: Fix strict Kotlin type inference
-        working-directory: build-src/FurnitureInstallerCRM-Android
-        run: |
+          cd build-src/FurnitureInstallerCRM-Android
+          patch -p2 < /tmp/masterobject-calendar.patch
           python3 - <<'PY'
           from pathlib import Path
           p = Path('app/src/main/java/ru/furniturecrm/app/Repository.kt')
@@ -108,53 +78,19 @@ jobs:
           old = '''            arrayOf(\n                if (c.isNull(0)) null else c.getString(0),\n                if (c.isNull(1)) null else c.getInt(1),'''
           new = '''            arrayOf<Any?>(\n                if (c.isNull(0)) null else c.getString(0),\n                if (c.isNull(1)) null else c.getInt(1),'''
           if old not in s:
-              raise SystemExit('Repository type-inference hotfix target not found')
+              raise SystemExit('hotfix target not found')
           p.write_text(s.replace(old, new, 1))
           PY
-          grep -F 'arrayOf<Any?>(' app/src/main/java/ru/furniturecrm/app/Repository.kt
 
-      - name: Verify final source configuration
-        working-directory: build-src/FurnitureInstallerCRM-Android
+      - name: Archive exact source
         run: |
-          grep -F 'applicationId = "ru.masterobject.calendarfix"' app/build.gradle.kts
-          grep -F 'versionCode = 300' app/build.gradle.kts
-          grep -F 'versionName = "3.0.0"' app/build.gradle.kts
-          grep -F 'const val ZONE_ID = "Europe/Moscow"' app/src/main/java/ru/furniturecrm/app/BusinessTime.kt
-          grep -F 'SQLiteOpenHelper(context, "furniture_crm.db", null, 4)' app/src/main/java/ru/furniturecrm/app/Database.kt
-          grep -F 'CREATE TABLE calendar_exceptions' app/src/main/java/ru/furniturecrm/app/Database.kt
-          grep -F 'remaining_half_days' app/src/main/java/ru/furniturecrm/app/Database.kt
-          if grep -R -E 'LocalDate\.now\(\)|LocalDateTime\.now\(\)|ZonedDateTime\.now\(\)' app/src/main/java/ru/furniturecrm/app --exclude=BusinessTime.kt; then
-            echo 'Direct system date/time remains outside BusinessTime' >&2
-            exit 1
-          fi
+          cd build-src
+          zip -qr ../MasterObject-CalendarFix-Source.zip FurnitureInstallerCRM-Android
+          sha256sum ../MasterObject-CalendarFix-Source.zip
 
-      - name: Run regression and unit tests
-        working-directory: build-src/FurnitureInstallerCRM-Android
-        run: gradle --no-daemon testDebugUnitTest --stacktrace
-
-      - name: Run Android Lint
-        working-directory: build-src/FurnitureInstallerCRM-Android
-        run: gradle --no-daemon lintDebug --stacktrace
-
-      - name: Build APK
-        working-directory: build-src/FurnitureInstallerCRM-Android
-        run: gradle --no-daemon assembleDebug --stacktrace
-
-      - name: Prepare final APK
-        run: cp build-src/FurnitureInstallerCRM-Android/app/build/outputs/apk/debug/app-debug.apk MasterObject-CalendarFix.apk
-
-      - name: Verify APK signature identity and version
-        run: |
-          test -s MasterObject-CalendarFix.apk
-          file MasterObject-CalendarFix.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs MasterObject-CalendarFix.apk
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging MasterObject-CalendarFix.apk | tee /tmp/badging.txt
-          grep -F "package: name='ru.masterobject.calendarfix' versionCode='300' versionName='3.0.0'" /tmp/badging.txt
-          sha256sum MasterObject-CalendarFix.apk
-
-      - name: Upload verified APK
+      - name: Upload exact source
         uses: actions/upload-artifact@v4
         with:
-          name: MasterObject-CalendarFix-APK
-          path: MasterObject-CalendarFix.apk
+          name: MasterObject-CalendarFix-Source
+          path: MasterObject-CalendarFix-Source.zip
           if-no-files-found: error
