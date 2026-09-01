@@ -1,0 +1,55 @@
+name: Build Saldo APK
+
+on:
+  push:
+    branches: [saldo-build-20260901-v2]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Rebuild and verify Saldo source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .saldo_payload/part*.txt | base64 -d > /tmp/Saldo-source.zip
+          echo "8d9a8468d18975a0834675bbc139759d0b3c96cfeeb46eefd1cd7f2cc36d7ce3  /tmp/Saldo-source.zip" | sha256sum -c -
+          unzip -t /tmp/Saldo-source.zip
+          mkdir -p /tmp/saldo-src
+          unzip -q /tmp/Saldo-source.zip -d /tmp/saldo-src
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/saldo-src/Saldo
+          gradle testDebugUnitTest --stacktrace
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/saldo-src/Saldo
+          gradle assembleDebug --stacktrace
+
+      - name: Upload Saldo APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Saldo-debug-apk
+          path: /tmp/saldo-src/Saldo/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
