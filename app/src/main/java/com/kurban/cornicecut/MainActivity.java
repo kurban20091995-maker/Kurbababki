@@ -1,491 +1,454 @@
 package com.kurban.cornicecut;
 
 import android.app.Activity;
-import android.os.Bundle;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
-
-    private EditText stockLengthInput;
-    private EditText kerfInput;
-    private EditText availableBarsInput;
-    private EditText partsInput;
-    private TextView resultView;
-    private Button calculateButton;
-
-    private final int bg = Color.rgb(245, 246, 248);
+    private final int bg = Color.rgb(242, 244, 247);
     private final int card = Color.WHITE;
-    private final int text = Color.rgb(25, 29, 36);
-    private final int muted = Color.rgb(96, 104, 118);
-    private final int accent = Color.rgb(32, 88, 120);
-    private final int good = Color.rgb(30, 110, 72);
-    private final int warn = Color.rgb(168, 92, 24);
+    private final int text = Color.rgb(27, 32, 39);
+    private final int muted = Color.rgb(94, 104, 116);
+    private final int accent = Color.rgb(30, 95, 132);
+    private final int danger = Color.rgb(155, 55, 48);
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    private LinearLayout content;
+    private ProfileStore store;
+    private List<ProfileStore.Profile> profiles;
+
+    @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        buildUi();
+        store = new ProfileStore(this);
+        profiles = store.loadProfiles();
+        buildShell();
+        showNewCut();
     }
 
-    private void buildUi() {
+    private void buildShell() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(bg);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(18), dp(18), dp(28));
-        scroll.addView(root, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.setPadding(dp(14), dp(16), dp(14), dp(32));
+        scroll.addView(root, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("РАСКРОЙ КАРНИЗА");
-        title.setTextColor(text);
+        title.setText("РАСКРОЙ КАРНИЗА v2");
         title.setTextSize(26);
+        title.setTextColor(text);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title);
 
         TextView sub = new TextView(this);
-        sub.setText("Минимум отходов • учёт пропила • схема по каждой палке");
+        sub.setText("Вылет • геометрия кухни • углы пилы • минимум отходов");
+        sub.setTextSize(13);
         sub.setTextColor(muted);
-        sub.setTextSize(14);
-        sub.setPadding(0, dp(4), 0, dp(18));
+        sub.setPadding(0, dp(3), 0, dp(12));
         root.addView(sub);
 
-        LinearLayout cardBox = new LinearLayout(this);
-        cardBox.setOrientation(LinearLayout.VERTICAL);
-        cardBox.setPadding(dp(16), dp(16), dp(16), dp(16));
-        cardBox.setBackgroundColor(card);
-        root.addView(cardBox, lpMatchWrap(dp(14)));
+        LinearLayout nav1 = row();
+        nav1.addView(navButton("НОВЫЙ РАСКРОЙ", v -> showNewCut()), weightLp());
+        nav1.addView(navButton("МОИ КАРНИЗЫ", v -> showProfiles()), weightLp());
+        root.addView(nav1, matchWrap(dp(6)));
 
-        stockLengthInput = field(cardBox, "Длина одной палки, мм", "3000", true);
-        kerfInput = field(cardBox, "Толщина пропила диска, мм", "3", true);
-        availableBarsInput = field(cardBox, "Сколько палок есть (0 = без ограничения)", "0", true);
+        LinearLayout nav2 = row();
+        nav2.addView(navButton("ОСТАТКИ", v -> showLeftovers()), weightLp());
+        nav2.addView(navButton("РАСЧЁТ УГЛОВ", v -> showAngles()), weightLp());
+        root.addView(nav2, matchWrap(dp(14)));
 
-        TextView partsLabel = label("Детали, мм");
-        partsLabel.setPadding(0, dp(12), 0, dp(6));
-        cardBox.addView(partsLabel);
-
-        partsInput = new EditText(this);
-        partsInput.setHint("Например: 1480, 920, 760, 620\nМожно: 520x3");
-        partsInput.setTextSize(17);
-        partsInput.setTextColor(text);
-        partsInput.setHintTextColor(Color.rgb(145, 150, 160));
-        partsInput.setGravity(Gravity.TOP | Gravity.START);
-        partsInput.setMinLines(4);
-        partsInput.setPadding(dp(12), dp(12), dp(12), dp(12));
-        partsInput.setBackgroundColor(Color.rgb(249, 250, 252));
-        cardBox.addView(partsInput, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(120)));
-
-        TextView help = new TextView(this);
-        help.setText("Форматы: 1200, 850, 600   или   1200 850 600   или   450x4");
-        help.setTextSize(12);
-        help.setTextColor(muted);
-        help.setPadding(0, dp(7), 0, dp(12));
-        cardBox.addView(help);
-
-        calculateButton = new Button(this);
-        calculateButton.setText("РАССЧИТАТЬ РАСКРОЙ");
-        calculateButton.setTextSize(16);
-        calculateButton.setTextColor(Color.WHITE);
-        calculateButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        calculateButton.setBackgroundColor(accent);
-        calculateButton.setAllCaps(false);
-        calculateButton.setPadding(dp(10), dp(13), dp(10), dp(13));
-        cardBox.addView(calculateButton, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
-        calculateButton.setOnClickListener(v -> startCalculation());
-
-        TextView note = new TextView(this);
-        note.setText("Пропил считается на каждую отпиливаемую деталь — это безопасный вариант для реальной нарезки.");
-        note.setTextSize(12);
-        note.setTextColor(muted);
-        note.setPadding(0, dp(10), 0, 0);
-        cardBox.addView(note);
-
-        TextView resultTitle = new TextView(this);
-        resultTitle.setText("РЕЗУЛЬТАТ");
-        resultTitle.setTextSize(18);
-        resultTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        resultTitle.setTextColor(text);
-        resultTitle.setPadding(0, dp(22), 0, dp(8));
-        root.addView(resultTitle);
-
-        resultView = new TextView(this);
-        resultView.setText("Введите размеры и нажмите «Рассчитать раскрой».");
-        resultView.setTextSize(16);
-        resultView.setTextColor(text);
-        resultView.setLineSpacing(0, 1.12f);
-        resultView.setPadding(dp(16), dp(16), dp(16), dp(16));
-        resultView.setBackgroundColor(card);
-        root.addView(resultView, lpMatchWrap(0));
-
+        content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        root.addView(content, matchWrap(0));
         setContentView(scroll);
     }
 
-    private LinearLayout.LayoutParams lpMatchWrap(int bottomMargin) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = bottomMargin;
-        return lp;
+    private void showNewCut() {
+        clearContent();
+        TextView h = heading("НОВЫЙ РАСКРОЙ");
+        content.addView(h);
+
+        LinearLayout box = cardBox();
+        content.addView(box, matchWrap(dp(14)));
+
+        final Spinner profileSpinner = spinner(box, "1. Выберите профиль", profileNames());
+        final EditText stockSpec = field(box, "2. Новые хлысты (длина × количество)", profiles.get(0).stockSpec, false);
+        final EditText leftoverSpec = field(box, "Остатки этого профиля", store.loadLeftovers(profiles.get(0).id), false);
+        final EditText effectiveOverhang = field(box, "Фактический вылет от выбранной линии, мм", fmt1(profiles.get(0).effectiveOverhang), true);
+        final Spinner offsetSide = spinner(box, "Карниз находится относительно маршрута кухни", new String[]{"СЛЕВА от линии", "СПРАВА от линии"});
+        final Spinner referenceLine = spinner(box, "Контрольная линия замера", new String[]{"по корпусу", "по фасаду", "по задней установочной кромке", "по передней кромке", "вручную заданная линия"});
+        final EditText kerf = field(box, "Толщина пропила, мм", "3", true);
+        final EditText trim = field(box, "Запас на чистовой рез НА ДЕТАЛЬ, мм", "0", true);
+        final EditText startExt = field(box, "Удлинение свободного левого конца, мм", "0", true);
+        final EditText endExt = field(box, "Удлинение свободного правого конца, мм", "0", true);
+
+        TextView planLabel = label("3–4. Участки кухни и углы");
+        planLabel.setPadding(0, dp(12), 0, dp(5));
+        box.addView(planLabel);
+        final EditText planInput = multiline(box,
+                "1800 R90\n1200 L135\n900",
+                "Каждая строка: длина и угол ДО следующего участка. R/П = направо, L/Л = налево.\nПример: 1800 R90 затем 1200. Для угла стены 135° пишите R135/L135.");
+
+        TextView syntax = small("Угол после R/L — это реальный угол МЕЖДУ соседними участками (90°, 87.5°, 135° и т.д.), а не угол поворота направления.");
+        box.addView(syntax);
+
+        PlanView planView = new PlanView(this);
+        planView.setMinimumHeight(dp(260));
+        box.addView(planView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(280)));
+
+        final TextView result = resultBox("Введите схему кухни и нажмите «Рассчитать».");
+
+        Button calc = actionButton("5–6. РАССЧИТАТЬ ГЕОМЕТРИЮ И РАСКРОЙ");
+        box.addView(calc, matchHeight(dp(56), dp(10)));
+        box.addView(small("Синяя линия на схеме — расчётная линия карниза; тёмная — исходная линия кухни."));
+        content.addView(heading("РЕЗУЛЬТАТ"));
+        content.addView(result, matchWrap(0));
+
+        profileSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                ProfileStore.Profile p = profiles.get(position);
+                stockSpec.setText(p.stockSpec);
+                leftoverSpec.setText(store.loadLeftovers(p.id));
+                effectiveOverhang.setText(fmt1(p.effectiveOverhang));
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
+        calc.setOnClickListener(v -> {
+            try {
+                int pi = profileSpinner.getSelectedItemPosition();
+                ProfileStore.Profile profile = profiles.get(Math.max(0, pi));
+                double overhang = number(effectiveOverhang, "Фактический вылет");
+                double kerfMm = number(kerf, "Пропил");
+                double trimMm = number(trim, "Запас на чистовой рез");
+                double startMm = number(startExt, "Удлинение левого конца");
+                double endMm = number(endExt, "Удлинение правого конца");
+                if (overhang < 0 || kerfMm < 0 || trimMm < 0 || startMm < 0 || endMm < 0) throw new IllegalArgumentException("Размеры не могут быть отрицательными");
+
+                List<CorniceGeometryEngine.SegmentSpec> specs = parsePlan(planInput.getText().toString());
+                boolean offsetLeft = offsetSide.getSelectedItemPosition() == 0;
+                CorniceGeometryEngine.Result geo = CorniceGeometryEngine.calculate(specs, overhang, offsetLeft, startMm, endMm);
+                planView.setResult(geo);
+
+                List<StockCutOptimizer.StockPiece> stocks = new ArrayList<>();
+                stocks.addAll(parseStocks(stockSpec.getText().toString(), false, "Х"));
+                stocks.addAll(parseStocks(leftoverSpec.getText().toString(), true, "О"));
+                if (stocks.isEmpty()) throw new IllegalArgumentException("Добавьте хотя бы один хлыст или остаток");
+
+                List<StockCutOptimizer.CutPiece> cuts = new ArrayList<>();
+                for (CorniceGeometryEngine.SegmentResult s : geo.segments) {
+                    cuts.add(new StockCutOptimizer.CutPiece(s.id, s.referenceLength, s.referenceLength + trimMm + kerfMm));
+                }
+                StockCutOptimizer.Solution solution = StockCutOptimizer.optimize(cuts, stocks, 4500);
+                result.setText(formatJob(profile, geo, solution, kerfMm, trimMm,
+                        referenceLine.getSelectedItem().toString()));
+            } catch (Exception ex) {
+                Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
-    private TextView label(String s) {
-        TextView v = new TextView(this);
-        v.setText(s);
-        v.setTextSize(14);
-        v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        v.setTextColor(text);
-        return v;
+    private String formatJob(ProfileStore.Profile profile, CorniceGeometryEngine.Result geo,
+                             StockCutOptimizer.Solution solution, double kerf, double trim, String referenceLine) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("ПРОФИЛЬ: ").append(profile.name).append("\n");
+        sb.append("Размер детали указан: ").append(referenceLine).append(" → смещённая линия карниза\n");
+        sb.append("Фактический вылет: ").append(fmt1(geo.effectiveOverhang)).append(" мм\n");
+        sb.append("Угол наклона профиля: ").append(fmt2(profile.springAngle)).append("°\n\n");
+
+        sb.append("РАССЧИТАННЫЕ ДЕТАЛИ\n");
+        for (CorniceGeometryEngine.SegmentResult s : geo.segments) {
+            sb.append(s.id).append(": кухня ").append(fmt1(s.baseLength))
+              .append(" → карниз ").append(fmt1(s.referenceLength))
+              .append(" → расход ").append(fmt1(s.referenceLength + trim + kerf)).append(" мм\n");
+            if (s.leftCornerAngleDeg > 0) appendCut(sb, "  левый конец", profile.springAngle, s.leftCornerAngleDeg, s.leftTurnRight, false);
+            else sb.append("  левый конец: прямой\n");
+            if (s.rightCornerAngleDeg > 0) appendCut(sb, "  правый конец", profile.springAngle, s.rightCornerAngleDeg, s.rightTurnRight, true);
+            else sb.append("  правый конец: прямой\n");
+        }
+
+        sb.append("\nОПТИМАЛЬНЫЙ РАСКРОЙ\n");
+        double usedMaterial = 0;
+        int n = 1;
+        for (StockCutOptimizer.BarPlan b : solution.bars) {
+            usedMaterial += b.stock.length;
+            sb.append("\n").append(b.stock.leftover ? "ОСТАТОК " : "ХЛЫСТ ")
+              .append("№").append(n++).append(" — ").append(fmt1(b.stock.length)).append(" мм\n");
+            sb.append("Резать: ");
+            for (int i = 0; i < b.pieces.size(); i++) {
+                if (i > 0) sb.append(" + ");
+                sb.append(b.pieces.get(i).id).append(" ").append(fmt1(b.pieces.get(i).referenceLength));
+            }
+            sb.append("\nОстаток после резов: ").append(fmt1(b.remaining)).append(" мм\n");
+        }
+
+        int pieces = geo.segments.size();
+        double kerfLoss = pieces * kerf;
+        double trimLoss = pieces * trim;
+        double usage = usedMaterial > 0 ? (solution.totalUseful / usedMaterial * 100.0) : 0;
+        sb.append("\nИТОГО\n")
+          .append("Хлыстов/остатков использовано: ").append(solution.bars.size()).append("\n")
+          .append(solution.exact ? "Оптимум для этого набора доказан\n" : "Лучший найденный вариант (большой набор)\n")
+          .append("Материала взято: ").append(fmt1(usedMaterial)).append(" мм\n")
+          .append("Полезная длина деталей: ").append(fmt1(solution.totalUseful)).append(" мм\n")
+          .append("Пропил (безопасный учёт 1 рез/деталь): ").append(fmt1(kerfLoss)).append(" мм\n")
+          .append("Запас на чистовой рез: ").append(fmt1(trimLoss)).append(" мм\n")
+          .append("Суммарные остатки: ").append(fmt1(solution.totalWaste)).append(" мм\n")
+          .append("Использование материала по полезной длине: ").append(fmt1(usage)).append("%\n\n")
+          .append("⚠ Перед чистовым угловым резом сделайте проверку на обрезке: фактический угол стены и ориентация профиля на конкретной пиле могут отличаться.");
+        return sb.toString();
     }
 
-    private EditText field(LinearLayout parent, String labelText, String value, boolean numeric) {
-        TextView l = label(labelText);
-        l.setPadding(0, dp(8), 0, dp(5));
-        parent.addView(l);
-
-        EditText e = new EditText(this);
-        e.setText(value);
-        e.setTextSize(18);
-        e.setTextColor(text);
-        e.setSelectAllOnFocus(true);
-        e.setSingleLine(true);
-        e.setPadding(dp(12), dp(10), dp(12), dp(10));
-        e.setBackgroundColor(Color.rgb(249, 250, 252));
-        if (numeric) e.setInputType(InputType.TYPE_CLASS_NUMBER);
-        parent.addView(e, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
-        return e;
-    }
-
-    private void startCalculation() {
-        final int stock;
-        final int kerf;
-        final int available;
-        final List<Integer> parts;
-
+    private void appendCut(StringBuilder sb, String name, double spring, double corner, Boolean turnRight, boolean rightEnd) {
         try {
-            stock = positiveInt(stockLengthInput.getText().toString(), "Длина палки");
-            kerf = nonNegativeInt(kerfInput.getText().toString(), "Пропил");
-            available = nonNegativeInt(availableBarsInput.getText().toString(), "Количество палок");
-            parts = parseParts(partsInput.getText().toString());
-        } catch (IllegalArgumentException ex) {
-            Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        if (parts.isEmpty()) {
-            Toast.makeText(this, "Добавьте хотя бы одну деталь", Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        for (int p : parts) {
-            if (p + kerf > stock) {
-                Toast.makeText(this,
-                        "Деталь " + p + " мм с учётом пропила не помещается в палку " + stock + " мм",
-                        Toast.LENGTH_LONG).show();
-                return;
-            }
-        }
-
-        calculateButton.setEnabled(false);
-        calculateButton.setText("СЧИТАЮ…");
-        resultView.setText("Подбираю самый выгодный раскрой…");
-
-        new Thread(() -> {
-            Solution solution = optimize(parts, stock, kerf, 3500);
-            String output = formatSolution(solution, stock, kerf, available);
-            runOnUiThread(() -> {
-                resultView.setText(output);
-                calculateButton.setEnabled(true);
-                calculateButton.setText("РАССЧИТАТЬ РАСКРОЙ");
-            });
-        }).start();
-    }
-
-    private int positiveInt(String s, String name) {
-        int v = parseIntSafe(s, name);
-        if (v <= 0) throw new IllegalArgumentException(name + " должна быть больше 0");
-        return v;
-    }
-
-    private int nonNegativeInt(String s, String name) {
-        int v = parseIntSafe(s, name);
-        if (v < 0) throw new IllegalArgumentException(name + " не может быть отрицательным");
-        return v;
-    }
-
-    private int parseIntSafe(String s, String name) {
-        try {
-            return Integer.parseInt(s.trim());
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Проверь поле «" + name + "»");
+            CompoundCutCalculator.Result c = CompoundCutCalculator.calculate(spring, corner);
+            boolean tr = turnRight != null && turnRight;
+            sb.append(name).append(": угол ").append(fmt2(corner)).append("°, MITER ")
+              .append(fmt2(c.miterDeg)).append("°, BEVEL ").append(fmt2(c.bevelDeg)).append("°; ")
+              .append(CompoundCutCalculator.directionHint(tr, rightEnd)).append("*\n");
+        } catch (Exception ex) {
+            sb.append(name).append(": ").append(ex.getMessage()).append("\n");
         }
     }
 
-    private List<Integer> parseParts(String raw) {
-        List<Integer> out = new ArrayList<>();
-        String normalized = raw.toLowerCase(Locale.ROOT)
-                .replace('×', 'x')
-                .replace('\n', ' ')
-                .replace('\r', ' ')
-                .replace(';', ' ')
-                .replace(',', ' ');
+    private void showProfiles() {
+        clearContent();
+        content.addView(heading("МОИ КАРНИЗЫ"));
+        LinearLayout box = cardBox();
+        content.addView(box, matchWrap(0));
 
-        String[] tokens = normalized.trim().split("\\s+");
-        Pattern p = Pattern.compile("^(\\d+)(?:[x*](\\d+))?$");
+        final Spinner choose = spinner(box, "Сохранённый профиль", profileNames());
+        final EditText name = field(box, "Название", profiles.get(0).name, false);
+        final EditText height = field(box, "Высота профиля, мм", fmt1(profiles.get(0).height), true);
+        final EditText profileOverhang = field(box, "Габаритный вылет профиля, мм", fmt1(profiles.get(0).profileOverhang), true);
+        final EditText platform = field(box, "Установочная площадка, мм", fmt1(profiles.get(0).platform), true);
+        final EditText effective = field(box, "ФАКТИЧЕСКИЙ вылет от корпуса/фасада, мм", fmt1(profiles.get(0).effectiveOverhang), true);
+        final EditText spring = field(box, "Угол установки / spring angle, °", fmt2(profiles.get(0).springAngle), true);
+        final EditText stocks = field(box, "Стандартные хлысты", profiles.get(0).stockSpec, false);
+        final EditText color = field(box, "Цвет", profiles.get(0).color, false);
+        final EditText coating = field(box, "Покрытие", profiles.get(0).coating, false);
+        final EditText batch = field(box, "Партия", profiles.get(0).batch, false);
 
-        for (String token : tokens) {
-            if (token.trim().isEmpty()) continue;
-            Matcher m = p.matcher(token.trim());
-            if (!m.matches()) {
-                throw new IllegalArgumentException("Не понял размер: " + token + ". Пример: 850 или 520x3");
+        choose.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                ProfileStore.Profile p = profiles.get(position);
+                name.setText(p.name); height.setText(fmt1(p.height)); profileOverhang.setText(fmt1(p.profileOverhang));
+                platform.setText(fmt1(p.platform)); effective.setText(fmt1(p.effectiveOverhang)); spring.setText(fmt2(p.springAngle));
+                stocks.setText(p.stockSpec); color.setText(p.color); coating.setText(p.coating); batch.setText(p.batch);
             }
-            int len = Integer.parseInt(m.group(1));
-            int count = m.group(2) == null ? 1 : Integer.parseInt(m.group(2));
-            if (len <= 0 || count <= 0) {
-                throw new IllegalArgumentException("Размер и количество должны быть больше 0");
-            }
-            if (count > 200) {
-                throw new IllegalArgumentException("Слишком большое количество одной детали: " + count);
-            }
-            for (int i = 0; i < count; i++) out.add(len);
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
+        TextView note = small("Важно: габаритный вылет профиля и фактическое нависание над выбранной линией — разные поля. В геометрию идёт только фактический вылет.");
+        note.setPadding(0, dp(10), 0, dp(8));
+        box.addView(note);
+
+        Button update = actionButton("ОБНОВИТЬ ВЫБРАННЫЙ ПРОФИЛЬ");
+        box.addView(update, matchHeight(dp(52), dp(8)));
+        Button add = secondaryButton("СОХРАНИТЬ КАК НОВЫЙ");
+        box.addView(add, matchHeight(dp(50), dp(8)));
+        Button del = secondaryButton("УДАЛИТЬ ПРОФИЛЬ");
+        del.setTextColor(danger);
+        box.addView(del, matchHeight(dp(48), 0));
+
+        update.setOnClickListener(v -> {
+            try {
+                int i = Math.max(0, choose.getSelectedItemPosition());
+                fillProfile(profiles.get(i), name, height, profileOverhang, platform, effective, spring, stocks, color, coating, batch);
+                store.saveProfiles(profiles);
+                Toast.makeText(this, "Профиль обновлён", Toast.LENGTH_SHORT).show();
+                showProfiles();
+            } catch (Exception ex) { Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show(); }
+        });
+        add.setOnClickListener(v -> {
+            try {
+                ProfileStore.Profile p = new ProfileStore.Profile();
+                p.id = "p" + System.currentTimeMillis();
+                fillProfile(p, name, height, profileOverhang, platform, effective, spring, stocks, color, coating, batch);
+                profiles.add(p); store.saveProfiles(profiles);
+                Toast.makeText(this, "Новый профиль сохранён", Toast.LENGTH_SHORT).show();
+                showProfiles();
+            } catch (Exception ex) { Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show(); }
+        });
+        del.setOnClickListener(v -> {
+            if (profiles.size() <= 1) { Toast.makeText(this, "Должен остаться хотя бы один профиль", Toast.LENGTH_LONG).show(); return; }
+            int i = Math.max(0, choose.getSelectedItemPosition());
+            profiles.remove(i); store.saveProfiles(profiles); showProfiles();
+        });
+    }
+
+    private void fillProfile(ProfileStore.Profile p, EditText name, EditText height, EditText profileOverhang,
+                             EditText platform, EditText effective, EditText spring, EditText stocks,
+                             EditText color, EditText coating, EditText batch) {
+        String n = name.getText().toString().trim();
+        if (n.isEmpty()) throw new IllegalArgumentException("Введите название профиля");
+        p.name = n;
+        p.height = number(height, "Высота");
+        p.profileOverhang = number(profileOverhang, "Габаритный вылет");
+        p.platform = number(platform, "Установочная площадка");
+        p.effectiveOverhang = number(effective, "Фактический вылет");
+        p.springAngle = number(spring, "Угол установки");
+        if (!(p.springAngle > 0 && p.springAngle < 90)) throw new IllegalArgumentException("Угол установки должен быть между 0° и 90°");
+        p.stockSpec = stocks.getText().toString().trim();
+        if (p.stockSpec.isEmpty()) throw new IllegalArgumentException("Укажите стандартные хлысты");
+        p.color = color.getText().toString().trim();
+        p.coating = coating.getText().toString().trim();
+        p.batch = batch.getText().toString().trim();
+    }
+
+    private void showLeftovers() {
+        clearContent();
+        content.addView(heading("МОИ ОСТАТКИ"));
+        LinearLayout box = cardBox(); content.addView(box, matchWrap(0));
+        final Spinner choose = spinner(box, "Профиль", profileNames());
+        final EditText leftovers = field(box, "Длины остатков, мм", store.loadLeftovers(profiles.get(0).id), false);
+        box.addView(small("Можно: 1480, 920, 670 или 1480x2. Остатки не смешиваются между разными профилями."));
+        choose.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { leftovers.setText(store.loadLeftovers(profiles.get(position).id)); }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        Button save = actionButton("СОХРАНИТЬ ОСТАТКИ"); box.addView(save, matchHeight(dp(52), dp(8)));
+        save.setOnClickListener(v -> {
+            int i = Math.max(0, choose.getSelectedItemPosition());
+            store.saveLeftovers(profiles.get(i).id, leftovers.getText().toString());
+            Toast.makeText(this, "Остатки сохранены", Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private void showAngles() {
+        clearContent();
+        content.addView(heading("РАСЧЁТ УГЛОВ"));
+        LinearLayout box = cardBox(); content.addView(box, matchWrap(0));
+        final EditText spring = field(box, "Угол наклона карниза, °", "38", true);
+        final EditText corner = field(box, "Угол между участками кухни, °", "90", true);
+        final TextView out = resultBox("Введите значения.");
+        Button calc = actionButton("РАССЧИТАТЬ MITER / BEVEL"); box.addView(calc, matchHeight(dp(52), dp(10)));
+        calc.setOnClickListener(v -> {
+            try {
+                double s = number(spring, "Угол наклона"); double c = number(corner, "Угол кухни");
+                CompoundCutCalculator.Result r = CompoundCutCalculator.calculate(s, c);
+                out.setText("MITER / поворот стола: " + fmt2(r.miterDeg) + "°\nBEVEL / наклон диска: " + fmt2(r.bevelDeg) + "°\n\nДля 38° и угла 90° контроль ≈ 31.62° / 33.86°.\nДля 45° и 90° контроль ≈ 35.26° / 30.00°.");
+            } catch (Exception ex) { Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show(); }
+        });
+
+        TextView th = label("Определить наклон по двум размерам"); th.setPadding(0, dp(18), 0, dp(5)); box.addView(th);
+        final EditText horizontal = field(box, "Горизонтальное отклонение, мм", "60", true);
+        final EditText vertical = field(box, "Вертикальный размер установочного треугольника, мм", "80", true);
+        Button tri = secondaryButton("РАССЧИТАТЬ ОБА УГЛА"); box.addView(tri, matchHeight(dp(50), dp(8)));
+        tri.setOnClickListener(v -> {
+            try {
+                double h = number(horizontal, "Горизонталь"); double vv = number(vertical, "Вертикаль");
+                double fromV = CompoundCutCalculator.angleFromVertical(h, vv);
+                double fromH = CompoundCutCalculator.angleFromHorizontal(h, vv);
+                out.setText("От вертикали: " + fmt2(fromV) + "°\nОт горизонтали: " + fmt2(fromH) + "°\nСумма: " + fmt2(fromV + fromH) + "°\n\nИспользуйте эти формулы только если введённые размеры — именно катеты РЕАЛЬНОГО установочного треугольника, а не общие габариты декоративного профиля.");
+            } catch (Exception ex) { Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show(); }
+        });
+        box.addView(out, matchWrap(0));
+    }
+
+    private List<CorniceGeometryEngine.SegmentSpec> parsePlan(String raw) {
+        String[] lines = raw.trim().split("\\r?\\n");
+        List<CorniceGeometryEngine.SegmentSpec> out = new ArrayList<>();
+        Pattern p = Pattern.compile("^\\s*(\\d+(?:[.,]\\d+)?)\\s*(?:([RrLlПпЛл])\\s*(\\d+(?:[.,]\\d+)?))?\\s*$");
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].trim().isEmpty()) continue;
+            Matcher m = p.matcher(lines[i]);
+            if (!m.matches()) throw new IllegalArgumentException("Не понял строку схемы: " + lines[i] + ". Пример: 1800 R90");
+            double length = parseNumber(m.group(1));
+            String turn = m.group(2);
+            double corner = m.group(3) == null ? 0 : parseNumber(m.group(3));
+            boolean turnRight = turn != null && (turn.equalsIgnoreCase("R") || turn.equalsIgnoreCase("П"));
+            out.add(new CorniceGeometryEngine.SegmentSpec(segmentId(out.size()), length, corner, turnRight));
         }
-        if (out.size() > 250) {
-            throw new IllegalArgumentException("За один расчёт можно добавить до 250 деталей");
+        if (out.isEmpty()) throw new IllegalArgumentException("Добавьте хотя бы один участок");
+        for (int i = 0; i < out.size() - 1; i++) {
+            if (out.get(i).cornerAngleAfterDeg == 0) throw new IllegalArgumentException("После участка " + out.get(i).id + " укажите R90/L90 или другой реальный угол");
         }
         return out;
     }
 
-    private Solution optimize(List<Integer> lengths, int stock, int kerf, long maxMillis) {
-        List<Item> items = new ArrayList<>();
-        for (int i = 0; i < lengths.size(); i++) {
-            items.add(new Item(lengths.get(i), lengths.get(i) + kerf, i));
+    private List<StockCutOptimizer.StockPiece> parseStocks(String raw, boolean leftover, String prefix) {
+        List<StockCutOptimizer.StockPiece> out = new ArrayList<>();
+        if (raw == null || raw.trim().isEmpty()) return out;
+        String normalized = raw.replace('×', 'x');
+        Pattern p = Pattern.compile("(\\d+(?:[.,]\\d+)?)(?:\\s*[xX*]\\s*(\\d+))?");
+        Matcher m = p.matcher(normalized);
+        int seq = 1;
+        while (m.find()) {
+            double len = parseNumber(m.group(1));
+            int count = m.group(2) == null ? 1 : Integer.parseInt(m.group(2));
+            if (!(len > 0) || count < 1 || count > 100) throw new IllegalArgumentException("Проверь список хлыстов");
+            for (int i = 0; i < count; i++) out.add(new StockCutOptimizer.StockPiece(prefix + (seq++), len, leftover));
         }
-        Collections.sort(items, (a, b) -> Integer.compare(b.effective, a.effective));
-
-        Solution ffd = firstFitDecreasing(items, stock);
-        int total = 0;
-        for (Item it : items) total += it.effective;
-        int lower = (total + stock - 1) / stock;
-
-        long deadline = System.currentTimeMillis() + maxMillis;
-        Solution best = ffd;
-        boolean proven = false;
-
-        if (items.size() <= 55) {
-            for (int bins = lower; bins < ffd.bars.size(); bins++) {
-                SearchState state = new SearchState(items, stock, bins, deadline);
-                boolean ok = state.search(0);
-                if (state.timedOut) {
-                    best.exact = false;
-                    return best;
-                }
-                if (ok) {
-                    best = state.toSolution();
-                    proven = true;
-                    break;
-                }
-            }
-            if (ffd.bars.size() == lower) proven = true;
-            if (!proven && best == ffd) proven = true;
-        }
-
-        best.exact = proven;
-        return best;
+        return out;
     }
 
-    private Solution firstFitDecreasing(List<Item> items, int stock) {
-        List<List<Item>> bars = new ArrayList<>();
-        List<Integer> remaining = new ArrayList<>();
-        for (Item item : items) {
-            boolean placed = false;
-            for (int b = 0; b < bars.size(); b++) {
-                if (remaining.get(b) >= item.effective) {
-                    bars.get(b).add(item);
-                    remaining.set(b, remaining.get(b) - item.effective);
-                    placed = true;
-                    break;
-                }
-            }
-            if (!placed) {
-                List<Item> one = new ArrayList<>();
-                one.add(item);
-                bars.add(one);
-                remaining.add(stock - item.effective);
-            }
-        }
-        Solution s = new Solution();
-        s.bars = bars;
-        s.exact = false;
-        return s;
+    private String segmentId(int i) {
+        if (i < 26) return String.valueOf((char)('A' + i));
+        return "P" + (i + 1);
     }
 
-    private String formatSolution(Solution s, int stock, int kerf, int available) {
-        StringBuilder sb = new StringBuilder();
-        int usefulTotal = 0;
-        int kerfTotal = 0;
-        int wasteTotal = 0;
+    private void clearContent() { content.removeAllViews(); }
+    private LinearLayout row() { LinearLayout x = new LinearLayout(this); x.setOrientation(LinearLayout.HORIZONTAL); return x; }
+    private LinearLayout cardBox() { LinearLayout x = new LinearLayout(this); x.setOrientation(LinearLayout.VERTICAL); x.setPadding(dp(14), dp(14), dp(14), dp(14)); x.setBackgroundColor(card); return x; }
 
-        sb.append("Нужно палок: ").append(s.bars.size()).append(" шт.\n");
-        sb.append(s.exact ? "Раскрой: оптимальный\n" : "Раскрой: лучший найденный вариант\n");
+    private TextView heading(String s) {
+        TextView v = new TextView(this); v.setText(s); v.setTextSize(18); v.setTextColor(text); v.setTypeface(Typeface.DEFAULT, Typeface.BOLD); v.setPadding(0, dp(8), 0, dp(8)); return v;
+    }
+    private TextView label(String s) { TextView v = new TextView(this); v.setText(s); v.setTextSize(14); v.setTextColor(text); v.setTypeface(Typeface.DEFAULT, Typeface.BOLD); return v; }
+    private TextView small(String s) { TextView v = new TextView(this); v.setText(s); v.setTextSize(12); v.setTextColor(muted); v.setLineSpacing(0, 1.12f); return v; }
+    private TextView resultBox(String s) { TextView v = new TextView(this); v.setText(s); v.setTextSize(14); v.setTextColor(text); v.setLineSpacing(0, 1.13f); v.setPadding(dp(14), dp(14), dp(14), dp(14)); v.setBackgroundColor(card); v.setTextIsSelectable(true); return v; }
 
-        if (available > 0) {
-            if (s.bars.size() <= available) {
-                sb.append("Материала хватает. Останется целых палок: ")
-                        .append(available - s.bars.size()).append(" шт.\n");
-            } else {
-                sb.append("⚠ Не хватает палок: ещё ")
-                        .append(s.bars.size() - available).append(" шт.\n");
-            }
-        }
+    private Button navButton(String s, View.OnClickListener l) { Button b = new Button(this); b.setText(s); b.setTextSize(11); b.setAllCaps(false); b.setOnClickListener(l); return b; }
+    private Button actionButton(String s) { Button b = new Button(this); b.setText(s); b.setTextColor(Color.WHITE); b.setTextSize(14); b.setTypeface(Typeface.DEFAULT, Typeface.BOLD); b.setAllCaps(false); b.setBackgroundColor(accent); return b; }
+    private Button secondaryButton(String s) { Button b = new Button(this); b.setText(s); b.setTextColor(text); b.setTextSize(13); b.setAllCaps(false); return b; }
 
-        sb.append("\n");
-
-        for (int i = 0; i < s.bars.size(); i++) {
-            List<Item> bar = s.bars.get(i);
-            Collections.sort(bar, (a, b) -> Integer.compare(b.length, a.length));
-            int usedEffective = 0;
-            int useful = 0;
-
-            sb.append("ПАЛКА №").append(i + 1).append(" — ").append(stock).append(" мм\n");
-            sb.append("Резать: ");
-            for (int j = 0; j < bar.size(); j++) {
-                if (j > 0) sb.append(" + ");
-                sb.append(bar.get(j).length);
-                usedEffective += bar.get(j).effective;
-                useful += bar.get(j).length;
-            }
-            int cuts = bar.size();
-            int cutLoss = cuts * kerf;
-            int leftover = stock - usedEffective;
-            sb.append(" мм\n");
-            sb.append("Пропил: ").append(cuts).append(" × ").append(kerf)
-                    .append(" = ").append(cutLoss).append(" мм\n");
-            sb.append("Остаток: ").append(leftover).append(" мм\n\n");
-
-            usefulTotal += useful;
-            kerfTotal += cutLoss;
-            wasteTotal += leftover;
-        }
-
-        int stockTotal = s.bars.size() * stock;
-        double efficiency = stockTotal == 0 ? 0 : (100.0 * usefulTotal / stockTotal);
-
-        sb.append("ИТОГО\n");
-        sb.append("Полезные детали: ").append(usefulTotal).append(" мм\n");
-        sb.append("Уйдёт в пропил: ").append(kerfTotal).append(" мм\n");
-        sb.append("Остатки: ").append(wasteTotal).append(" мм\n");
-        sb.append(String.format(Locale.getDefault(), "Использование материала: %.1f%%", efficiency));
-
-        return sb.toString();
+    private EditText field(LinearLayout parent, String label, String value, boolean numeric) {
+        TextView l = label(label); l.setPadding(0, dp(8), 0, dp(4)); parent.addView(l);
+        EditText e = new EditText(this); e.setText(value == null ? "" : value); e.setTextSize(16); e.setTextColor(text); e.setSelectAllOnFocus(true); e.setSingleLine(true); e.setPadding(dp(10), dp(8), dp(10), dp(8)); e.setBackgroundColor(Color.rgb(248, 249, 251));
+        if (numeric) e.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        parent.addView(e, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))); return e;
     }
 
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
+    private EditText multiline(LinearLayout parent, String value, String hint) {
+        EditText e = new EditText(this); e.setText(value); e.setHint(hint); e.setTextSize(16); e.setTextColor(text); e.setHintTextColor(Color.rgb(130, 138, 148)); e.setGravity(Gravity.TOP | Gravity.START); e.setMinLines(5); e.setPadding(dp(10), dp(10), dp(10), dp(10)); e.setBackgroundColor(Color.rgb(248, 249, 251));
+        parent.addView(e, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150))); return e;
     }
 
-    static class Item {
-        final int length;
-        final int effective;
-        final int id;
-        Item(int length, int effective, int id) {
-            this.length = length;
-            this.effective = effective;
-            this.id = id;
-        }
+    private Spinner spinner(LinearLayout parent, String labelText, String[] values) {
+        TextView l = label(labelText); l.setPadding(0, dp(8), 0, dp(4)); parent.addView(l);
+        Spinner s = new Spinner(this); ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, values); a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); s.setAdapter(a); parent.addView(s, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50))); return s;
     }
 
-    static class Solution {
-        List<List<Item>> bars;
-        boolean exact;
-    }
+    private String[] profileNames() { String[] a = new String[profiles.size()]; for (int i = 0; i < profiles.size(); i++) a[i] = profiles.get(i).name; return a; }
+    private double number(EditText e, String name) { try { return parseNumber(e.getText().toString()); } catch (Exception ex) { throw new IllegalArgumentException("Проверь поле «" + name + "»"); } }
+    private double parseNumber(String s) { return Double.parseDouble(s.trim().replace(',', '.')); }
+    private String fmt1(double v) { return String.format(Locale.US, "%.1f", v); }
+    private String fmt2(double v) { return String.format(Locale.US, "%.2f", v); }
+    private int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
-    static class SearchState {
-        final List<Item> items;
-        final int stock;
-        final int binCount;
-        final int[] remaining;
-        final int[] assignment;
-        final long deadline;
-        int[] foundAssignment;
-        boolean timedOut = false;
-
-        SearchState(List<Item> items, int stock, int binCount, long deadline) {
-            this.items = items;
-            this.stock = stock;
-            this.binCount = binCount;
-            this.deadline = deadline;
-            this.remaining = new int[binCount];
-            Arrays.fill(this.remaining, stock);
-            this.assignment = new int[items.size()];
-            Arrays.fill(this.assignment, -1);
-        }
-
-        boolean search(int index) {
-            if (System.currentTimeMillis() > deadline) {
-                timedOut = true;
-                return false;
-            }
-            if (index >= items.size()) {
-                foundAssignment = Arrays.copyOf(assignment, assignment.length);
-                return true;
-            }
-
-            Item item = items.get(index);
-            HashSet<Integer> triedRemaining = new HashSet<>();
-
-            for (int b = 0; b < binCount; b++) {
-                int before = remaining[b];
-                if (before < item.effective) continue;
-                if (!triedRemaining.add(before)) continue;
-
-                remaining[b] -= item.effective;
-                assignment[index] = b;
-                if (search(index + 1)) return true;
-                if (timedOut) return false;
-                assignment[index] = -1;
-                remaining[b] = before;
-
-                if (before == stock) break;
-            }
-            return false;
-        }
-
-        Solution toSolution() {
-            List<List<Item>> bars = new ArrayList<>();
-            for (int i = 0; i < binCount; i++) bars.add(new ArrayList<>());
-            for (int i = 0; i < items.size(); i++) {
-                bars.get(foundAssignment[i]).add(items.get(i));
-            }
-            Solution s = new Solution();
-            s.bars = bars;
-            s.exact = true;
-            return s;
-        }
-    }
+    private LinearLayout.LayoutParams weightLp() { LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1f); lp.setMargins(dp(2), 0, dp(2), 0); return lp; }
+    private LinearLayout.LayoutParams matchWrap(int bottom) { LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); lp.bottomMargin = bottom; return lp; }
+    private LinearLayout.LayoutParams matchHeight(int height, int bottom) { LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height); lp.bottomMargin = bottom; return lp; }
 }
