@@ -133,6 +133,13 @@ jobs:
           grep -F 'startedSeptemberFirstForTwoDaysEndsSeptemberSecond' app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt
           grep -F 'Выбрать в календаре телефона' app/src/main/java/ru/furniturecrm/app/CrmApp.kt
 
+      - name: Upload reconstructed source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: MasterObject-PhoneCalendar-Source
+          path: build-src/FurnitureInstallerCRM-Android
+          if-no-files-found: error
+
       - name: Run scheduler regression and unit tests
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon testDebugUnitTest --stacktrace
