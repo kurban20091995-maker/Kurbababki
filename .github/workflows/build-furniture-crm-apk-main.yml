@@ -93,8 +93,8 @@ jobs:
           from pathlib import Path
           p = Path('app/src/main/java/ru/furniturecrm/app/Repository.kt')
           s = p.read_text()
-          old = '''            arrayOf(\n                if (c.isNull(0)) null else c.getString(0),\n                if (c.isNull(1)) null else c.getInt(1),'''
-          new = '''            arrayOf<Any?>(\n                if (c.isNull(0)) null else c.getString(0),\n                if (c.isNull(1)) null else c.getInt(1),'''
+          old = '            arrayOf(\n                if (c.isNull(0)) null else c.getString(0),\n                if (c.isNull(1)) null else c.getInt(1),'
+          new = '            arrayOf<Any?>(\n                if (c.isNull(0)) null else c.getString(0),\n                if (c.isNull(1)) null else c.getInt(1),'
           if old not in s:
               raise SystemExit('CalendarFix type hotfix target not found')
           p.write_text(s.replace(old, new, 1))
@@ -118,11 +118,38 @@ jobs:
           sed -i 's/workDays,exceptions,LocalDate.of(2026,9,5),0/workDays,exceptions,LocalDate.of(2026,9,6),0/' "$TEST"
           sed -i '0,/assertEquals(LocalDate.of(2026,9,5),item.startDate)/s//assertEquals(LocalDate.of(2026,9,6),item.startDate)/' "$TEST"
 
-      - name: Apply RuStore trial and one-time purchase patch
+      - name: Apply RuStore staged source files
         run: |
-          test -s .masterobject-rustore/paywall.patch
-          cd build-src/FurnitureInstallerCRM-Android
-          patch -p1 < ../../.masterobject-rustore/paywall.patch
+          ROOT=build-src/FurnitureInstallerCRM-Android
+          cp .masterobject-rustore/files/settings.gradle.kts "$ROOT/settings.gradle.kts"
+          cp .masterobject-rustore/files/app-build.gradle.kts "$ROOT/app/build.gradle.kts"
+          cp .masterobject-rustore/files/AndroidManifest.xml "$ROOT/app/src/main/AndroidManifest.xml"
+          cp .masterobject-rustore/files/MainActivity.kt "$ROOT/app/src/main/java/ru/furniturecrm/app/MainActivity.kt"
+          cp .masterobject-rustore/files/LicensePolicy.kt "$ROOT/app/src/main/java/ru/furniturecrm/app/LicensePolicy.kt"
+          cp .masterobject-rustore/files/LicenseUi.kt "$ROOT/app/src/main/java/ru/furniturecrm/app/LicenseUi.kt"
+          cp .masterobject-rustore/files/RuStoreLicenseManager.kt "$ROOT/app/src/main/java/ru/furniturecrm/app/RuStoreLicenseManager.kt"
+          cp .masterobject-rustore/files/LicensePolicyTest.kt "$ROOT/app/src/test/java/ru/furniturecrm/app/LicensePolicyTest.kt"
+
+      - name: Wire paywall into Compose root
+        working-directory: build-src/FurnitureInstallerCRM-Android
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/ru/furniturecrm/app/CrmApp.kt')
+          s = p.read_text()
+          replacements = [
+              ('fun FurnitureCrmApp(vm: AppViewModel, initialProjectId: Long? = null) {\n    val state by vm.state.collectAsState()\n', 'fun FurnitureCrmApp(vm: AppViewModel, licenseManager: RuStoreLicenseManager, initialProjectId: Long? = null) {\n    val state by vm.state.collectAsState()\n    val license by licenseManager.state.collectAsState()\n'),
+              ('            when {\n                creating || editId != null -> {', '            when {\n                !license.canUseApp -> LicensePaywallScreen(\n                    license = license,\n                    vm = vm,\n                    onBuy = licenseManager::purchase,\n                    onRestore = { licenseManager.refreshPurchases(silent = false) },\n                )\n                creating || editId != null -> {'),
+              ('                            MainScreen.HOME -> DashboardScreen(state, onProject = { detailId = it }, onAdd = { creating = true }, onQueue = { screenName = MainScreen.QUEUE.name })', '                            MainScreen.HOME -> DashboardScreen(state, license, onBuy = licenseManager::purchase, onProject = { detailId = it }, onAdd = { creating = true }, onQueue = { screenName = MainScreen.QUEUE.name })'),
+              ('private fun DashboardScreen(state: AppUiState, onProject: (Long) -> Unit, onAdd: () -> Unit, onQueue: () -> Unit) {', 'private fun DashboardScreen(state: AppUiState, license: LicenseUiState, onBuy: () -> Unit, onProject: (Long) -> Unit, onAdd: () -> Unit, onQueue: () -> Unit) {'),
+              ('            Text("Сегодня ${BusinessTime.today().format(RuFullDate)} • календарь телефона • ${BusinessTime.zoneLabel()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)\n        }\n        item {', '            Text("Сегодня ${BusinessTime.today().format(RuFullDate)} • календарь телефона • ${BusinessTime.zoneLabel()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)\n        }\n        if (license.isTrial) {\n            item { TrialAccessBanner(license = license, onBuy = onBuy) }\n        }\n        item {'),
+          ]
+          for old, new in replacements:
+              if old not in s:
+                  raise SystemExit('CrmApp paywall target not found: ' + old[:80])
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
 
       - name: Verify paywall source invariants
         working-directory: build-src/FurnitureInstallerCRM-Android
@@ -137,22 +164,25 @@ jobs:
           grep -F 'ENFORCE_PAYWALL' app/build.gradle.kts
           grep -F 'Восстановить покупку' app/src/main/java/ru/furniturecrm/app/LicenseUi.kt
           grep -F 'Экспортировать свои данные' app/src/main/java/ru/furniturecrm/app/LicenseUi.kt
+          grep -F 'fun FurnitureCrmApp(vm: AppViewModel, licenseManager: RuStoreLicenseManager' app/src/main/java/ru/furniturecrm/app/CrmApp.kt
           grep -F 'ZoneId.systemDefault()' app/src/main/java/ru/furniturecrm/app/BusinessTime.kt
 
       - name: Run all unit tests including license policy
         working-directory: build-src/FurnitureInstallerCRM-Android
         run: gradle --no-daemon testDebugUnitTest --stacktrace
 
-      - name: Dump RuStore Pay SDK classes on compile failure
+      - name: Inspect RuStore Pay SDK on compile failure
         if: failure()
         run: |
           echo '--- RuStore SDK cache ---'
-          find ~/.gradle/caches/modules-2/files-2.1/ru.rustore.sdk -type f 2>/dev/null | sort | tail -100 || true
+          find ~/.gradle/caches/modules-2/files-2.1/ru.rustore.sdk -type f 2>/dev/null | sort | tail -120 || true
           AAR=$(find ~/.gradle/caches/modules-2/files-2.1/ru.rustore.sdk -name '*.aar' 2>/dev/null | grep '/pay/' | head -1 || true)
           if [ -n "$AAR" ]; then
             echo "Inspecting $AAR"
             unzip -p "$AAR" classes.jar > /tmp/rustore-pay-classes.jar
-            jar tf /tmp/rustore-pay-classes.jar | grep -E 'RuStorePayClient|ProductPurchaseParams|ProductId|PreferredPurchaseType|PurchaseInteractor|IntentInteractor' | head -200 || true
+            jar tf /tmp/rustore-pay-classes.jar | grep -E 'RuStorePayClient|ProductPurchase|ProductType|ProductId|PreferredPurchaseType|PurchaseInteractor|IntentInteractor' | head -250 || true
+            javap -classpath /tmp/rustore-pay-classes.jar ru.rustore.sdk.pay.PurchaseInteractor 2>/dev/null | head -120 || true
+            javap -classpath /tmp/rustore-pay-classes.jar ru.rustore.sdk.pay.model.ProductPurchase 2>/dev/null | head -100 || true
           fi
 
       - name: Run Android Lint
