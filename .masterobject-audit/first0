@@ -1,0 +1,64 @@
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/build.gradle.kts FurnitureInstallerCRM-Android/app/build.gradle.kts
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/build.gradle.kts	2026-08-30 19:43:32.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/build.gradle.kts	2026-08-30 20:55:54.556255683 +0000
+@@ -8,11 +8,11 @@
+     compileSdk = 36
+ 
+     defaultConfig {
+-        applicationId = "ru.furniturecrm.app"
++        applicationId = "ru.masterobject.crm"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 2
+-        versionName = "1.1.0"
++        versionCode = 10
++        versionName = "2.0.0"
+ 
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+     }
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/AndroidManifest.xml FurnitureInstallerCRM-Android/app/src/main/AndroidManifest.xml
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/AndroidManifest.xml	2026-08-30 19:43:33.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/AndroidManifest.xml	2026-08-30 20:58:51.525281445 +0000
+@@ -29,7 +29,7 @@
+                 android:resource="@xml/file_paths" />
+         </provider>
+         <receiver android:name=".ReminderReceiver" android:exported="false" />
+-        <receiver android:name=".BootReceiver" android:exported="true">
++        <receiver android:name=".BootReceiver" android:exported="false">
+             <intent-filter>
+                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/AppViewModel.kt FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/AppViewModel.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/AppViewModel.kt	2026-08-30 19:43:55.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/AppViewModel.kt	2026-08-30 20:56:48.583286924 +0000
+@@ -4,6 +4,7 @@
+ import androidx.lifecycle.AndroidViewModel
+ import androidx.lifecycle.viewModelScope
+ import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
+ import kotlinx.coroutines.flow.asStateFlow
+@@ -25,23 +26,26 @@
+     private val repo = CrmRepository(app)
+     private val _state = MutableStateFlow(AppUiState())
+     val state: StateFlow<AppUiState> = _state.asStateFlow()
++    private var refreshJob: Job? = null
+ 
+     init { refresh() }
+ 
+     fun refresh(selectedId: Long? = _state.value.selected?.summary?.project?.id) {
+-        viewModelScope.launch {
++        refreshJob?.cancel()
++        refreshJob = viewModelScope.launch {
+             _state.value = _state.value.copy(loading = true)
+             runCatching {
+                 withContext(Dispatchers.IO) {
+                     val settings = repo.getSettings()
+                     val projects = repo.listProjects()
+-                    val schedule = Scheduler.calculate(projects.map { it.project }, settings.workDays)
+-                    val finance = repo.getFinanceStats()
++                    val current = Scheduler.currentStart(settings.workDays)
++                    val schedule = Scheduler.calculate(projects.map { it.project }, settings.workDays, current.first, current.second)
++                    val finance = repo.getFinanceStats(projects, settings)
+  

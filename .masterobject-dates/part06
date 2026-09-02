@@ -1,0 +1,94 @@
+l start = Scheduler.currentStart(workDays, LocalDate.of(2026, 9, 5), LocalTime.of(20, 30))
+@@ -99,4 +104,92 @@
+         assertEquals(1, item.endHalf)
+     }
+ 
++    @Test fun quickEstimateNeverUsesPastMorningSlot() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=1,title="Будущий монтаж",clientName="A",plannedStart=LocalDate.of(2026,9,2),durationHalfDays=2,queuePosition=1),
++        ), workDays, LocalDate.of(2026,9,1), 0)
++        val estimate = Scheduler.estimateNewJob(
++            result, 1, workDays, LocalDate.of(2026,9,1), 1
++        )
++        assertEquals(LocalDate.of(2026,9,1), estimate.startDate)
++        assertEquals(1, estimate.startHalf)
++        assertEquals(LocalDate.of(2026,9,1), estimate.endDate)
++        assertEquals(1, estimate.endHalf)
++    }
++
++    @Test fun quickEstimateSkipsGapThatBecameTooShort() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=1,title="Завтра",clientName="A",plannedStart=LocalDate.of(2026,9,2),durationHalfDays=2,queuePosition=1),
++        ), workDays, LocalDate.of(2026,9,1), 0)
++        val estimate = Scheduler.estimateNewJob(
++            result, 2, workDays, LocalDate.of(2026,9,1), 1
++        )
++        assertEquals(LocalDate.of(2026,9,3), estimate.startDate)
++        assertEquals(0, estimate.startHalf)
++    }
++
++    @Test fun quickEstimateKeepsHalfDayPrecisionAtQueueTail() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=1,title="Полдня",clientName="A",durationHalfDays=1,queuePosition=1),
++        ), workDays, LocalDate.of(2026,9,1), 0)
++        val estimate = Scheduler.estimateNewJob(
++            result, 2, workDays, LocalDate.of(2026,9,1), 0
++        )
++        assertEquals(LocalDate.of(2026,9,1), estimate.startDate)
++        assertEquals(1, estimate.startHalf)
++        assertEquals(LocalDate.of(2026,9,2), estimate.endDate)
++        assertEquals(0, estimate.endHalf)
++    }
++
++    @Test fun enteredDaysRoundUpInsteadOfUnderestimating() {
++        assertEquals(1, Scheduler.daysToHalfDaysCeil(0.5))
++        assertEquals(2, Scheduler.daysToHalfDaysCeil(1.0))
++        assertEquals(3, Scheduler.daysToHalfDaysCeil(1.2))
++        assertEquals(5, Scheduler.daysToHalfDaysCeil(2.1))
++    }
++
++    @Test fun moscowBusinessDateWinsOverUtcPreviousDay() {
++        val instant = Instant.parse("2026-08-30T21:30:00Z")
++        assertEquals(LocalDate.of(2026, 8, 31), BusinessTime.dateAt(instant))
++        assertEquals(LocalTime.of(0, 30), BusinessTime.timeAt(instant))
++    }
++
++    @Test fun fixedDateReservationIsNotPushedByFlexibleQueueJob() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=1,title="Без даты",clientName="A",durationHalfDays=6,queuePosition=1),
++            Project(id=2,title="Согласован",clientName="B",plannedStart=LocalDate.of(2026,9,2),startTime="09:00",durationHalfDays=2,queuePosition=2,status=ProjectStatus.DATE_CONFIRMED),
++        ), workDays, LocalDate.of(2026,9,1), 0)
++        val fixed = result.items.first { it.projectId == 2L }
++        val flexible = result.items.first { it.projectId == 1L }
++        assertEquals(LocalDate.of(2026,9,2), fixed.startDate)
++        assertEquals(0, fixed.startHalf)
++        assertEquals(LocalDate.of(2026,9,3), flexible.startDate)
++        assertEquals(0, flexible.startHalf)
++        assertEquals(LocalDate.of(2026,9,5), flexible.endDate)
++        assertEquals(1, flexible.endHalf)
++    }
++
++    @Test fun quickEstimateRespectsReservedInstallationAndUsesOnlyWholeGap() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=2,title="Согласован",clientName="B",plannedStart=LocalDate.of(2026,9,2),durationHalfDays=2,queuePosition=1,status=ProjectStatus.DATE_CONFIRMED),
++        ), workDays, LocalDate.of(2026,9,1), 0)
++        val oneDay = Scheduler.estimateNewJob(result, 2, workDays, LocalDate.of(2026,9,1), 0)
++        assertEquals(LocalDate.of(2026,9,1), oneDay.startDate)
++        assertEquals(LocalDate.of(2026,9,1), oneDay.endDate)
++        assertEquals(1, oneDay.endHalf)
++        val oneAndHalf = Scheduler.estimateNewJob(result, 3, workDays, LocalDate.of(2026,9,1), 0)
++        assertEquals(LocalDate.of(2026,9,3), oneAndHalf.startDate)
++        assertEquals(LocalDate.of(2026,9,4), oneAndHalf.endDate)
++        assertEquals(0, oneAndHalf.endHalf)
++    }
++
++    @Test fun sundayReservationMovesToMondayAndReportsOneDayShift() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=1,title="Воскресенье",clientName="A",plannedStart=LocalDate.of(2026,8,30),durationHalfDays=1,status=ProjectStatus.DATE_CONFIRMED),
++        ), workDays, LocalDate.of(2026,8,30), 0)
++        val item = result.items.first()
++        assertEquals(LocalDate.of(2026,8,31), item.startDate)
++        assertEquals(1L, item.delayedFromFixedDateByDays)
++    }
++
+ }

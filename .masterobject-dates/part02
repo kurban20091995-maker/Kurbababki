@@ -1,0 +1,99 @@
+ect-backup-${BusinessTime.today()}.json")},modifier=Modifier.fillMaxWidth()){Text("Экспортировать все данные")}; Spacer(Modifier.height(8.dp)); OutlinedButton(onClick={importLauncher.launch(arrayOf("application/json","text/plain"))},modifier=Modifier.fillMaxWidth()){Text("Восстановить из копии")} }
+         item { Text("JSON-копия включает объекты, оплаты, расходы, чек-листы, настройки и ссылки на вложения. Сами файлы фотографий хранятся локально в приложении и не встраиваются в JSON.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+         if(state.projects.isEmpty()) item { OutlinedButton(onClick=vm::seedDemo,modifier=Modifier.fillMaxWidth()){Text("Добавить 4 демонстрационных объекта")} }
++        item { Text("Часовой пояс расчётов: Москва / Дагестан (UTC+3)", style=MaterialTheme.typography.bodySmall, color=MaterialTheme.colorScheme.onSurfaceVariant) }
+         item { Text("Мастер Объект • Android • локальная база SQLite",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+     }
+ }
+@@ -426,7 +479,7 @@
+             if(type==FurnitureType.OTHER) OutlinedTextField(custom,{custom=it},label={Text("Свой тип")},modifier=Modifier.fillMaxWidth())
+             OutlinedTextField(price,{price=it.filter{ch->ch.isDigit()||ch==','||ch=='.'}},label={Text("Стоимость работы, ₽")},modifier=Modifier.fillMaxWidth(),singleLine=true)
+             OutlinedTextField(date,{date=it},label={Text("Дата начала, ГГГГ-ММ-ДД")},modifier=Modifier.fillMaxWidth(),singleLine=true,supportingText={Text("Можно оставить пустым — CRM рассчитает ориентировочную дату")})
+-            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){AssistChip(onClick={date=LocalDate.now().toString()},label={Text("Сегодня")});AssistChip(onClick={date=LocalDate.now().plusDays(1).toString()},label={Text("Завтра")});AssistChip(onClick={date=""},label={Text("Без даты")})}
++            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){AssistChip(onClick={date=BusinessTime.today().toString()},label={Text("Сегодня")});AssistChip(onClick={date=BusinessTime.today().plusDays(1).toString()},label={Text("Завтра")});AssistChip(onClick={date=""},label={Text("Без даты")})}
+             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){OutlinedTextField(time,{time=it.take(5)},label={Text("Время")},modifier=Modifier.weight(1f),singleLine=true);OutlinedTextField(duration,{duration=it.filter{ch->ch.isDigit()||ch==','||ch=='.'}},label={Text("Дней")},modifier=Modifier.weight(1f),singleLine=true)}
+             EnumPicker("Статус",status,ProjectStatus.entries,{it.label}){status=it}
+             OutlinedTextField(notes,{notes=it},label={Text("Заметки")},modifier=Modifier.fillMaxWidth(),minLines=3)
+@@ -448,7 +501,7 @@
+ private fun <T> EnumPicker(label:String,value:T,values:List<T>,text:(T)->String,onValue:(T)->Unit){var open by remember{mutableStateOf(false)};Box{OutlinedButton(onClick={open=true},modifier=Modifier.fillMaxWidth()){Column(Modifier.fillMaxWidth()){Text(label,style=MaterialTheme.typography.labelSmall);Text(text(value))}};DropdownMenu(open,{open=false}){values.forEach{DropdownMenuItem(text={Text(text(it))},onClick={onValue(it);open=false})}}}}
+ 
+ @Composable
+-private fun ProjectDetailScreen(d: ProjectDetails, vm: AppViewModel, onBack:()->Unit, onEdit:()->Unit, onDeleted:()->Unit) {
++private fun ProjectDetailScreen(d: ProjectDetails, scheduled: ScheduledProject?, vm: AppViewModel, onBack:()->Unit, onEdit:()->Unit, onDeleted:()->Unit) {
+     val p=d.summary.project
+     val context=LocalContext.current
+     var dialog by remember{mutableStateOf<String?>(null)}
+@@ -486,7 +539,14 @@
+                 ElevatedCard(Modifier.fillMaxWidth(), shape=RoundedCornerShape(22.dp)){
+                     Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                         Text("Монтаж",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)
+-                        Text("Дата: ${p.plannedStart?.format(RuFullDate)?:"рассчитывается по очереди"} • ${p.startTime}")
++                        if (p.plannedStart != null) Text("Согласовано: ${p.plannedStart.format(RuFullDate)} • ${p.startTime}")
++                        if (scheduled != null) {
++                            Text("По графику: ${scheduled.startDate.format(RuFullDate)} ${scheduled.startHalf.slotLabel()} → ${scheduled.endDate.format(RuFullDate)} ${scheduled.endHalf.slotLabel()}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
++                        } else if (p.status == ProjectStatus.COMPLETED) {
++                            Text("Фактически: ${p.actualStart?.format(RuFullDate) ?: "—"} → ${p.actualFinish?.format(RuFullDate) ?: "—"}")
++                        } else if (p.plannedStart == null) {
++                            Text("Дата рассчитывается по очереди")
++                        }
+                         Text("Плановая длительность: ${p.durationHalfDays.halfDaysLabel()}")
+                     }
+                 }
+diff -ruN WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/MainActivity.kt MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/MainActivity.kt
+--- WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/MainActivity.kt	2026-08-30 18:10:33.000000000 +0000
++++ MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/MainActivity.kt	2026-08-30 21:20:00.054538888 +0000
+@@ -16,4 +16,10 @@
+         val openProjectId = intent?.getLongExtra("projectId", -1L)?.takeIf { it > 0 }
+         setContent { FurnitureCrmApp(vm, openProjectId) }
+     }
++
++    override fun onResume() {
++        super.onResume()
++        vm.refresh()
++        ReminderScheduler.schedule(this)
++    }
+ }
+diff -ruN WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Models.kt MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Models.kt
+--- WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Models.kt	2026-08-30 21:29:11.784420792 +0000
++++ MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Models.kt	2026-08-30 21:20:00.054073438 +0000
+@@ -85,6 +85,14 @@
+ 
+ data class FreeWindow(val startDate: LocalDate, val startHalf: Int, val endDate: LocalDate, val endHalf: Int)
+ 
++data class JobEstimate(
++    val startDate: LocalDate,
++    val startHalf: Int,
++    val endDate: LocalDate,
++    val endHalf: Int,
++    val durationHalfDays: Int,
++)
++
+ data class ScheduleResult(
+     val items: List<ScheduledProject>,
+     val nextFreeDate: LocalDate,
+diff -ruN WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Notifications.kt MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Notifications.kt
+--- WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Notifications.kt	2026-08-30 21:29:11.784619110 +0000
++++ MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Notifications.kt	2026-08-30 21:26:18.115700526 +0000
+@@ -17,8 +17,6 @@
+ import kotlinx.coroutines.SupervisorJob
+ import kotlinx.coroutines.launch
+ import java.time.Duration
+-import java.time.LocalDate
+-import java.time.ZonedDateTime
+ 
+ object ReminderScheduler {
+     private const val REQUEST = 7001
+@@ -27,7 +25,7 @@
+         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+         val intent = Intent(context, ReminderReceiver::class.java)
+         val pi = PendingIntent.getBroadcast(context, REQUEST, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+-        val now = ZonedDateTime.now()
++        val now = BusinessTime.now()
+         var next = now.withHour(8).withMinute(0).withSecond(0).withNano(0)
+         if (!next.isAfter(now)) next = next.plusDays(1)
+         alarm.setInexactRepeating(AlarmManager.RTC_WAKEUP, next.toInstant().toEpochMilli(), AlarmManager.INTERVAL_DAY, pi)
+@@ -50,8 +48,8 @@
+                 val settings = repo.getSettings()
+                 val projects = repo.listProjects()
+                 // Reminder runs around 08:00, so morning is the intended scheduling cursor.
+-                val schedule = Scheduler.calculate(projects.map 

@@ -1,0 +1,112 @@
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/build.gradle.kts FurnitureInstallerCRM-Android/app/build.gradle.kts
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/build.gradle.kts	2026-08-30 19:43:32.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/build.gradle.kts	2026-08-30 20:55:54.556255683 +0000
+@@ -8,11 +8,11 @@
+     compileSdk = 36
+ 
+     defaultConfig {
+-        applicationId = "ru.furniturecrm.app"
++        applicationId = "ru.masterobject.crm"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 2
+-        versionName = "1.1.0"
++        versionCode = 10
++        versionName = "2.0.0"
+ 
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+     }
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/AndroidManifest.xml FurnitureInstallerCRM-Android/app/src/main/AndroidManifest.xml
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/AndroidManifest.xml	2026-08-30 19:43:33.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/AndroidManifest.xml	2026-08-30 20:58:51.525281445 +0000
+@@ -29,7 +29,7 @@
+                 android:resource="@xml/file_paths" />
+         </provider>
+         <receiver android:name=".ReminderReceiver" android:exported="false" />
+-        <receiver android:name=".BootReceiver" android:exported="true">
++        <receiver android:name=".BootReceiver" android:exported="false">
+             <intent-filter>
+                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/AppViewModel.kt FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/AppViewModel.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/AppViewModel.kt	2026-08-30 19:43:55.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/AppViewModel.kt	2026-08-30 20:56:48.583286924 +0000
+@@ -4,6 +4,7 @@
+ import androidx.lifecycle.AndroidViewModel
+ import androidx.lifecycle.viewModelScope
+ import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
+ import kotlinx.coroutines.flow.asStateFlow
+@@ -25,23 +26,26 @@
+     private val repo = CrmRepository(app)
+     private val _state = MutableStateFlow(AppUiState())
+     val state: StateFlow<AppUiState> = _state.asStateFlow()
++    private var refreshJob: Job? = null
+ 
+     init { refresh() }
+ 
+     fun refresh(selectedId: Long? = _state.value.selected?.summary?.project?.id) {
+-        viewModelScope.launch {
++        refreshJob?.cancel()
++        refreshJob = viewModelScope.launch {
+             _state.value = _state.value.copy(loading = true)
+             runCatching {
+                 withContext(Dispatchers.IO) {
+                     val settings = repo.getSettings()
+                     val projects = repo.listProjects()
+-                    val schedule = Scheduler.calculate(projects.map { it.project }, settings.workDays)
+-                    val finance = repo.getFinanceStats()
++                    val current = Scheduler.currentStart(settings.workDays)
++                    val schedule = Scheduler.calculate(projects.map { it.project }, settings.workDays, current.first, current.second)
++                    val finance = repo.getFinanceStats(projects, settings)
+                     val selected = selectedId?.let(repo::getProjectDetails)
+-                    Five(projects, settings, schedule, finance, selected)
++                    Loaded(projects, settings, schedule, finance, selected)
+                 }
+             }.onSuccess { r ->
+-                _state.value = AppUiState(r.a, r.b, r.c, r.d, r.e, loading = false)
++                _state.value = AppUiState(r.projects, r.settings, r.schedule, r.finance, r.selected, loading = false)
+             }.onFailure { e ->
+                 _state.value = _state.value.copy(loading = false, message = e.message ?: "Ошибка")
+             }
+@@ -57,9 +61,7 @@
+         withContext(Dispatchers.Main) { onSaved(id) }
+     }
+ 
+-    fun deleteProject(id: Long, onDone: () -> Unit = {}) = mutate {
+-        repo.deleteProject(id); withContext(Dispatchers.Main) { onDone() }
+-    }
++    fun deleteProject(id: Long, onDone: () -> Unit = {}) = mutate { repo.deleteProject(id); withContext(Dispatchers.Main) { onDone() } }
+     fun startProject(id: Long) = mutate { repo.startProject(id) }
+     fun completeProject(id: Long, finalBasePriceCents: Long? = null) = mutate { repo.completeProject(id, finalBasePriceCents) }
+     fun completeProjectWithPayment(id: Long, finalBasePriceCents: Long?, paymentCents: Long, method: PaymentMethod, comment: String) = mutate { repo.completeProjectWithPayment(id, finalBasePriceCents, paymentCents, method, comment) }
+@@ -69,6 +71,7 @@
+     fun addChecklist(id: Long, text: String) = mutate { repo.addChecklist(id, text) }
+     fun toggleChecklist(id: Long, done: Boolean) = mutate { repo.toggleChecklist(id, done) }
+     fun addAttachment(id: Long, uri: String, name: String, mimeType: String = "") = mutate { repo.addAttachment(id, uri, name, mimeType) }
++    fun addAttachments(id: Long, attachments: List<PhotoStorage.SavedPhoto>) = mutate { repo.addAttachments(id, attachments) }
+     fun removeExtra(id: Long) = mutate { repo.removeExtra(id) }
+     fun removePayment(id: Long) = mutate { repo.removePayment(id) }
+     fun removeExpense(id: Long) = mutate { repo.removeExpense(id) }
+@@ -90,5 +93,11 @@
+         }
+     }
+ 
+-    private data class Five<A,B,C,D,E>(val a:A,val b:B,val c:C,val d:D,val e:E)
++    private data class Loaded(
++        val projects: List<ProjectSummary>,
++        val settings: AppSettings,
++        val schedule: ScheduleResult,
++        val finance: FinanceStats,
++        val selected: ProjectDetails?,
++    )
+ }
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/CrmApp.kt FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/CrmApp.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/CrmApp.kt	2026-08-30 19:46:11.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/CrmApp.kt	2026-08-30 20:58:16.771919551 +0000
+@@ -402,7 +402,7 @@
+         item { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { listOf(7,3,1,0).forEach{n->FilterChip(selected=n in state.settings.reminderDays,onClick={val next=state.settings.reminderDays.toMutableSet();if(n in next)next.remove(n)else next.add(n);vm.setReminderDays(next)},label={Text(if(n==0)"В день" else "за $n дн.")})} } }
+         item { SectionTitle("Резервная копия") }
+         item { Button(onClick={exportLauncher.launch("furniture-crm-backup-${LocalDate.now()}.json")},modifier=Modifier.fillMaxWidth()){Text("Экспортировать все 

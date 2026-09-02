@@ -1,0 +1,182 @@
+ate, LocalDate> {
++        val duration = durationHalfDays.coerceAtLeast(1)
++        val gap = result.gaps.firstOrNull { gapCapacity(it, workDays) >= duration }
++        val start = gap?.let { Slot(it.startDate, it.startHalf) } ?: Slot(result.nextFreeDate, result.nextFreeHalf)
++        val end = advanceForDuration(start, duration, workDays)
++        return start.date to end.date
++    }
++
++    fun startHalfFromTime(value: String): Int {
++        val time = runCatching { LocalTime.parse(value.trim()) }.getOrNull() ?: return 0
++        return if (time >= afternoonStartsAt) 1 else 0
++    }
++
++    fun currentHalfForActualStart(now: LocalTime = LocalTime.now()): Int =
++        if (now >= afternoonStartsAt) 1 else 0
++
++    private fun normalizedStartSlot(from: LocalDate, fromHalf: Int, workDays: Set<DayOfWeek>): Slot {
++        val d = nextWorkDay(from, workDays)
++        return if (d == from) Slot(d, fromHalf.coerceIn(0, 1)) else Slot(d, 0)
++    }
++
++    private fun requestedStartSlot(project: Project, workDays: Set<DayOfWeek>): Slot? {
++        val date = project.plannedStart ?: return null
++        val normalized = nextWorkDay(date, workDays)
++        return Slot(normalized, if (normalized == date) startHalfFromTime(project.startTime) else 0)
++    }
++
++    private fun advanceForDuration(start: Slot, duration: Int, workDays: Set<DayOfWeek>): Slot {
++        var slot = start
++        repeat(duration - 1) { slot = nextSlot(slot, workDays) }
++        return slot
++    }
++
++    private fun gapCapacity(gap: FreeWindow, workDays: Set<DayOfWeek>): Int {
++        var slot = Slot(gap.startDate, gap.startHalf)
++        val end = Slot(gap.endDate, gap.endHalf)
++        var count = 0
++        while (compareSlots(slot, end) <= 0 && count < 10_000) {
++            count++
++            if (slot == end) break
++            slot = nextSlot(slot, workDays)
+         }
+-        return start to end
++        return count
+     }
+ 
+-    private fun countWorkDays(start: LocalDate, end: LocalDate, workDays: Set<DayOfWeek>): Int {
+-        if (end.isBefore(start)) return 0
+-        var d = start
++    /** Number of half-day slots that are fully behind the current planning cursor. */
++    private fun countElapsedBefore(start: Slot, cursor: Slot, workDays: Set<DayOfWeek>): Int {
++        if (compareSlots(start, cursor) >= 0) return 0
++        var slot = start
+         var count = 0
+-        while (!d.isAfter(end)) {
+-            if (workDays.isEmpty() || d.dayOfWeek in workDays) count++
+-            d = d.plusDays(1)
++        while (compareSlots(slot, cursor) < 0 && count < 20_000) {
++            // The explicit actual start is respected even if the configured work days changed later.
++            if (slot.date == start.date || workDays.isEmpty() || slot.date.dayOfWeek in workDays) count++
++            slot = nextSlot(slot, workDays)
+         }
+         return count
+     }
+ 
+-    private fun nextSlot(date: LocalDate, half: Int, workDays: Set<DayOfWeek>): Pair<LocalDate, Int> {
+-        return if (half == 0) date to 1 else nextWorkDay(date.plusDays(1), workDays) to 0
++    private fun compareSlots(a: Slot, b: Slot): Int {
++        val dateCmp = a.date.compareTo(b.date)
++        return if (dateCmp != 0) dateCmp else a.half.compareTo(b.half)
+     }
+ 
++    private fun nextSlot(slot: Slot, workDays: Set<DayOfWeek>): Slot =
++        if (slot.half == 0) Slot(slot.date, 1)
++        else Slot(nextWorkDay(slot.date.plusDays(1), workDays), 0)
++
++    private fun previousSlot(slot: Slot, workDays: Set<DayOfWeek>): Slot =
++        if (slot.half == 1) Slot(slot.date, 0)
++        else Slot(previousWorkDay(slot.date.minusDays(1), workDays), 1)
++
+     fun nextWorkDay(start: LocalDate, workDays: Set<DayOfWeek>): LocalDate {
+         if (workDays.isEmpty()) return start
+         var d = start
+-        repeat(14) {
++        repeat(8) {
+             if (d.dayOfWeek in workDays) return d
+             d = d.plusDays(1)
+         }
+         return start
+     }
+ 
+-    private fun previousSlotDate(fixed: LocalDate, workDays: Set<DayOfWeek>): LocalDate {
+-        var d = fixed.minusDays(1)
+-        repeat(14) {
++    private fun previousWorkDay(start: LocalDate, workDays: Set<DayOfWeek>): LocalDate {
++        if (workDays.isEmpty()) return start
++        var d = start
++        repeat(8) {
+             if (d.dayOfWeek in workDays) return d
+             d = d.minusDays(1)
+         }
+-        return fixed.minusDays(1)
++        return start
+     }
+ }
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt FurnitureInstallerCRM-Android/app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt	2026-08-30 18:11:44.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/test/java/ru/furniturecrm/app/SchedulerTest.kt	2026-08-30 20:57:35.019205532 +0000
+@@ -5,6 +5,7 @@
+ import org.junit.Test
+ import java.time.DayOfWeek
+ import java.time.LocalDate
++import java.time.LocalTime
+ 
+ class SchedulerTest {
+     private val workDays = setOf(
+@@ -37,4 +38,65 @@
+         assertTrue(result.gaps.isNotEmpty())
+         assertEquals(LocalDate.of(2026,9,10), result.items.first().startDate)
+     }
++
++    @Test fun afternoonStartUsesSecondHalfOfDay() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=1,title="Монтаж",clientName="A",plannedStart=LocalDate.of(2026,9,1),startTime="15:00",durationHalfDays=2,queuePosition=1),
++        ), workDays, LocalDate.of(2026,9,1))
++        val item = result.items.first()
++        assertEquals(LocalDate.of(2026,9,1), item.startDate)
++        assertEquals(1, item.startHalf)
++        assertEquals(LocalDate.of(2026,9,2), item.endDate)
++        assertEquals(0, item.endHalf)
++    }
++
++    @Test fun inProgressJobAlwaysComesFirst() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=1,title="Очередь",clientName="A",durationHalfDays=2,queuePosition=1),
++            Project(id=2,title="В работе",clientName="B",durationHalfDays=4,queuePosition=9,status=ProjectStatus.IN_PROGRESS,actualStart=LocalDate.of(2026,9,1)),
++        ), workDays, LocalDate.of(2026,9,1))
++        assertEquals(2L, result.items.first().projectId)
++    }
++
++    @Test fun inProgressAfternoonStartSubtractsOnlyWorkedHalfDay() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=2,title="В работе",clientName="B",startTime="15:00",durationHalfDays=4,queuePosition=1,status=ProjectStatus.IN_PROGRESS,actualStart=LocalDate.of(2026,9,1)),
++        ), workDays, LocalDate.of(2026,9,2))
++        val item = result.items.first()
++        // 2 days planned, but only Tue afternoon elapsed => 1.5 days remain, Wed AM..Thu AM.
++        assertEquals(LocalDate.of(2026,9,2), item.startDate)
++        assertEquals(LocalDate.of(2026,9,3), item.endDate)
++        assertEquals(0, item.endHalf)
++    }
++
++    @Test fun estimateNewJobUsesFreeGapBeforeFutureInstallation() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=1,title="Будущий монтаж",clientName="A",plannedStart=LocalDate.of(2026,9,10),durationHalfDays=2,queuePosition=1),
++        ), workDays, LocalDate.of(2026,9,1))
++        val estimate = Scheduler.estimateNewJob(result, 4, workDays)
++        assertEquals(LocalDate.of(2026,9,1), estimate.first)
++        assertEquals(LocalDate.of(2026,9,2), estimate.second)
++    }
++    @Test fun eveningStartsPlanningFromNextWorkDay() {
++        val start = Scheduler.currentStart(workDays, LocalDate.of(2026, 9, 5), LocalTime.of(20, 30))
++        assertEquals(LocalDate.of(2026, 9, 7), start.first)
++        assertEquals(0, start.second)
++    }
++
++    @Test fun afternoonStartsFromSecondHalfOfToday() {
++        val start = Scheduler.currentStart(workDays, LocalDate.of(2026, 9, 4), LocalTime.of(15, 0))
++        assertEquals(LocalDate.of(2026, 9, 4), start.first)
++        assertEquals(1, start.second)
++    }
++
++    @Test fun inProgressConsumesMorningWhenNowIsAfternoon() {
++        val result = Scheduler.calculate(listOf(
++            Project(id=1,title="В работе",clientName="A",durationHalfDays=4,status=ProjectStatus.IN_PROGRESS,actualStart=LocalDate.of(2026,9,4),actualStartHalf=0),
++        ), workDays, LocalDate.of(2026,9,4), 1)
++        val item = result.items.first()
++        assertEquals(1, item.startHalf)
++        assertEquals(LocalDate.of(2026,9,5), item.endDate)
++        assertEquals(1, item.endHalf)
++    }
++
+ }

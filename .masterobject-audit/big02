@@ -1,0 +1,281 @@
+)) }
++        val cv = ContentValues().apply {
++            put("status", ProjectStatus.IN_PROGRESS.name)
++            put("actual_start", LocalDate.now().toString())
++            put("actual_start_half", Scheduler.currentHalfForActualStart())
++        }
+         dbh.writableDatabase.update("projects", cv, "id=?", arrayOf(id.toString()))
+     }
+ 
+@@ -212,8 +228,27 @@
+     }
+ 
+     fun addAttachment(projectId: Long, uri: String, name: String, mimeType: String = "") {
+-        val cv = ContentValues().apply { put("project_id", projectId); put("uri", uri); put("name", name.ifBlank { "Файл" }); put("mime_type", mimeType); put("created_at", java.time.LocalDateTime.now().toString()) }
+-        dbh.writableDatabase.insertOrThrow("attachments", null, cv)
++        addAttachments(projectId, listOf(PhotoStorage.SavedPhoto(uri, name.ifBlank { "Файл" }, mimeType)))
++    }
++
++    fun addAttachments(projectId: Long, attachments: List<PhotoStorage.SavedPhoto>) {
++        if (attachments.isEmpty()) return
++        val db = dbh.writableDatabase
++        db.beginTransaction()
++        try {
++            val createdAt = java.time.LocalDateTime.now().toString()
++            attachments.forEach { item ->
++                val cv = ContentValues().apply {
++                    put("project_id", projectId)
++                    put("uri", item.uri)
++                    put("name", item.name.ifBlank { "Файл" })
++                    put("mime_type", item.mimeType)
++                    put("created_at", createdAt)
++                }
++                db.insertOrThrow("attachments", null, cv)
++            }
++            db.setTransactionSuccessful()
++        } finally { db.endTransaction() }
+     }
+ 
+     fun removeExtra(id: Long) { dbh.writableDatabase.delete("extras", "id=?", arrayOf(id.toString())) }
+@@ -232,12 +267,14 @@
+         try {
+             val ids = db.rawQuery("SELECT id FROM projects WHERE status NOT IN ('COMPLETED','CANCELLED') ORDER BY queue_position,id", null).use { c -> buildList { while(c.moveToNext()) add(c.getLong(0)) } }.toMutableList()
+             val i = ids.indexOf(id)
+-            val j = (i + delta).coerceIn(0, ids.lastIndex)
+-            if (i >= 0 && i != j) {
+-                val tmp = ids[i]; ids[i] = ids[j]; ids[j] = tmp
+-                ids.forEachIndexed { index, pid ->
+-                    val cv = ContentValues().apply { put("queue_position", index + 1) }
+-                    db.update("projects", cv, "id=?", arrayOf(pid.toString()))
++            if (i >= 0 && ids.isNotEmpty()) {
++                val j = (i + delta).coerceIn(0, ids.lastIndex)
++                if (i != j) {
++                    val tmp = ids[i]; ids[i] = ids[j]; ids[j] = tmp
++                    ids.forEachIndexed { index, pid ->
++                        val cv = ContentValues().apply { put("queue_position", index + 1) }
++                        db.update("projects", cv, "id=?", arrayOf(pid.toString()))
++                    }
+                 }
+             }
+             db.setTransactionSuccessful()
+@@ -245,7 +282,7 @@
+     }
+ 
+     fun exportJson(): String {
+-        val root = JSONObject().put("version", 2).put("exportedAt", java.time.LocalDateTime.now().toString())
++        val root = JSONObject().put("version", 3).put("exportedAt", java.time.LocalDateTime.now().toString())
+         val db = dbh.readableDatabase
+         listOf("projects","extras","payments","expenses","checklist","attachments","settings").forEach { table ->
+             val arr = JSONArray()
+@@ -270,7 +307,7 @@
+ 
+     fun importJson(json: String) {
+         val root = JSONObject(json)
+-        require(root.optInt("version", 0) in 1..2) { "Неподдерживаемая версия резервной копии" }
++        require(root.optInt("version", 0) in 1..3) { "Неподдерживаемая версия резервной копии" }
+         val db = dbh.writableDatabase
+         db.beginTransaction()
+         try {
+@@ -293,8 +330,8 @@
+                     db.insertOrThrow(table, null, cv)
+                 }
+             }
+-            if (setting(db, "work_days", "").isBlank()) setSetting("work_days", "1,2,3,4,5,6")
+-            if (setting(db, "reminder_days", "").isBlank()) setSetting("reminder_days", "7,3,1,0")
++            if (setting(db, "work_days", "").isBlank()) insertSetting(db, "work_days", "1,2,3,4,5,6")
++            if (setting(db, "reminder_days", "").isBlank()) insertSetting(db, "reminder_days", "7,3,1,0")
+             db.setTransactionSuccessful()
+         } finally { db.endTransaction() }
+     }
+@@ -317,12 +354,21 @@
+         furnitureType = runCatching { FurnitureType.valueOf(str("furniture_type")) }.getOrDefault(FurnitureType.OTHER), customType = str("custom_type"),
+         basePriceCents = long("base_price_cents"), plannedStart = nullableStr("planned_start")?.let(LocalDate::parse), startTime = str("start_time"),
+         durationHalfDays = int("duration_half_days"), status = runCatching { ProjectStatus.valueOf(str("status")) }.getOrDefault(ProjectStatus.QUEUED),
+-        notes = str("notes"), queuePosition = int("queue_position"), actualStart = nullableStr("actual_start")?.let(LocalDate::parse), actualFinish = nullableStr("actual_finish")?.let(LocalDate::parse)
++        notes = str("notes"), queuePosition = int("queue_position"),
++        actualStart = nullableStr("actual_start")?.let(LocalDate::parse),
++        actualStartHalf = nullableInt("actual_start_half"),
++        actualFinish = nullableStr("actual_finish")?.let(LocalDate::parse)
+     )
+ 
++    private fun insertSetting(db: SQLiteDatabase, key: String, value: String) {
++        val cv = ContentValues().apply { put("key", key); put("value", value) }
++        db.insertWithOnConflict("settings", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
++    }
++
+     private fun Cursor.toSummary() = ProjectSummary(toProject(), long("total_price"), long("paid"), long("expenses_total"), int("photo_count"))
+     private fun Cursor.str(name: String): String = getString(getColumnIndexOrThrow(name)) ?: ""
+     private fun Cursor.nullableStr(name: String): String? { val i=getColumnIndexOrThrow(name); return if(isNull(i)) null else getString(i) }
+     private fun Cursor.long(name: String): Long = getLong(getColumnIndexOrThrow(name))
+     private fun Cursor.int(name: String): Int = getInt(getColumnIndexOrThrow(name))
++    private fun Cursor.nullableInt(name: String): Int? { val i=getColumnIndexOrThrow(name); return if(isNull(i)) null else getInt(i) }
+ }
+diff -ruN /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Scheduler.kt FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Scheduler.kt
+--- /tmp/basev2/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Scheduler.kt	2026-08-30 18:13:53.000000000 +0000
++++ FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Scheduler.kt	2026-08-30 20:55:39.192019967 +0000
+@@ -2,117 +2,206 @@
+ 
+ import java.time.DayOfWeek
+ import java.time.LocalDate
++import java.time.LocalTime
+ import java.time.temporal.ChronoUnit
+ 
+ object Scheduler {
++    private data class Slot(val date: LocalDate, val half: Int)
++
++    private val afternoonStartsAt: LocalTime = LocalTime.of(13, 0)
++    private val workDayEndsAt: LocalTime = LocalTime.of(19, 0)
++
++    /**
++     * Starting slot for the live app. After the work day ends we start planning from
++     * the next configured work day instead of pretending that today is still free.
++     */
++    fun currentStart(
++        workDays: Set<DayOfWeek>,
++        today: LocalDate = LocalDate.now(),
++        now: LocalTime = LocalTime.now(),
++    ): Pair<LocalDate, Int> {
++        if (workDays.isNotEmpty() && today.dayOfWeek !in workDays) {
++            return nextWorkDay(today, workDays) to 0
++        }
++        return when {
++            now >= workDayEndsAt -> nextWorkDay(today.plusDays(1), workDays) to 0
++            now >= afternoonStartsAt -> today to 1
++            else -> today to 0
++        }
++    }
++
+     fun calculate(
+         projects: List<Project>,
+         workDays: Set<DayOfWeek>,
+         from: LocalDate = LocalDate.now(),
++        fromHalf: Int = 0,
+     ): ScheduleResult {
++        val initial = normalizedStartSlot(from, fromHalf, workDays)
++
+         val active = projects
++            .asSequence()
+             .filter { it.status !in setOf(ProjectStatus.COMPLETED, ProjectStatus.CANCELLED) }
+             .map { p ->
+-                if (p.status == ProjectStatus.IN_PROGRESS && p.actualStart != null && p.actualStart.isBefore(from)) {
+-                    val elapsedWorkDays = countWorkDays(p.actualStart, from.minusDays(1), workDays)
+-                    p.copy(durationHalfDays = (p.durationHalfDays - elapsedWorkDays * 2).coerceAtLeast(1), plannedStart = from)
++                if (p.status == ProjectStatus.IN_PROGRESS && p.actualStart != null) {
++                    val elapsedHalfDays = countElapsedBefore(
++                        start = Slot(p.actualStart, p.actualStartHalf ?: startHalfFromTime(p.startTime)),
++                        cursor = initial,
++                        workDays = workDays,
++                    )
++                    p.copy(durationHalfDays = (p.durationHalfDays - elapsedHalfDays).coerceAtLeast(1))
+                 } else p
+             }
+-            .sortedWith(compareBy<Project> { it.queuePosition }.thenBy { it.id })
++            .sortedWith(
++                compareBy<Project> { if (it.status == ProjectStatus.IN_PROGRESS) 0 else 1 }
++                    .thenBy { it.queuePosition }
++                    .thenBy { it.id }
++            )
++            .toList()
++
+         if (active.isEmpty()) {
+-            val d = nextWorkDay(from, workDays)
+-            return ScheduleResult(emptyList(), d, 0, 0, emptyList())
++            return ScheduleResult(emptyList(), initial.date, initial.half, 0, emptyList())
+         }
+ 
+-        var cursorDate = nextWorkDay(from, workDays)
+-        var cursorHalf = 0
+-        val items = mutableListOf<ScheduledProject>()
++        var cursor = initial
++        val items = ArrayList<ScheduledProject>(active.size)
+         val gaps = mutableListOf<FreeWindow>()
+         var total = 0
+ 
+         active.forEach { p ->
+-            val fixed = p.plannedStart?.let { nextWorkDay(it, workDays) }
+-            if (fixed != null && fixed.isAfter(cursorDate)) {
+-                gaps += FreeWindow(cursorDate, cursorHalf, previousSlotDate(fixed, workDays), 1)
+-                cursorDate = fixed
+-                cursorHalf = 0
++            val requested = requestedStartSlot(p, workDays)
++            val effectiveRequested = if (p.status == ProjectStatus.IN_PROGRESS) initial else requested
++
++            if (effectiveRequested != null && compareSlots(effectiveRequested, cursor) > 0) {
++                val gapEnd = previousSlot(effectiveRequested, workDays)
++                if (compareSlots(cursor, gapEnd) <= 0) {
++                    gaps += FreeWindow(cursor.date, cursor.half, gapEnd.date, gapEnd.half)
++                }
++                cursor = effectiveRequested
+             }
+-            val requested = fixed
+-            val startDate = cursorDate
+-            val startHalf = cursorHalf
+-            val delayed = if (requested != null && startDate.isAfter(requested)) ChronoUnit.DAYS.between(requested, startDate) else 0
++
++            val start = cursor
++            val delayed = if (requested != null && compareSlots(start, requested) > 0) {
++                ChronoUnit.DAYS.between(requested.date, start.date).coerceAtLeast(0)
++            } else 0
+ 
+             var remaining = p.durationHalfDays.coerceAtLeast(1)
+-            var endDate = cursorDate
+-            var endHalf = cursorHalf
++            var end = cursor
+             while (remaining > 0) {
+-                endDate = cursorDate
+-                endHalf = cursorHalf
++                end = cursor
+                 remaining--
+                 total++
+-                if (remaining > 0) {
+-                    val n = nextSlot(cursorDate, cursorHalf, workDays)
+-                    cursorDate = n.first
+-                    cursorHalf = n.second
+-                }
+-            }
+-            val after = nextSlot(endDate, endHalf, workDays)
+-            cursorDate = after.first
+-            cursorHalf = after.second
+-            items += ScheduledProject(p.id, p.title, p.furnitureType, startDate, startHalf, endDate, endHalf, delayed)
+-        }
+-        return ScheduleResult(items, cursorDate, cursorHalf, total, gaps.filter { !it.endDate.isBefore(it.startDate) })
+-    }
+-
+-    fun estimateNewJob(result: ScheduleResult, durationHalfDays: Int, workDays: Set<DayOfWeek>): Pair<LocalDate, LocalDate> {
+-        var date = result.nextFreeDate
+-        var half = result.nextFreeHalf
+-        val start = date
+-        var remaining = durationHalfDays.coerceAtLeast(1)
+-        var end = date
+-        while (remaining > 0) {
+-            end = date
+-            remaining--
+-            if (remaining > 0) {
+-                val n = nextSlot(date, half, workDays)
+-                date = n.first
+-                half = n.second
++                if (remaining > 0) cursor = nextSlot(cursor, workDays)
+             }
++            cursor = nextSlot(end, workDays)
++
++            items += ScheduledProject(
++                projectId = p.id,
++                title = p.title,
++                furnitureType = p.furnitureType,
++                startDate = start.date,
++                startHalf = start.half,
++                endDate = end.date,
++                endHalf = end.half,
++                delayedFromFixedDateByDays = delayed,
++            )
++        }
++
++        return ScheduleResult(items, cursor.date, cursor.half, total, gaps)
++    }
++
++    /** Earliest place where a new job actually fits, including a free window before a fixed job. */
++    fun estimateNewJob(
++        result: ScheduleResult,
++        durationHalfDays: Int,
++        workDays: Set<DayOfWeek>,
++    ): Pair<LocalD

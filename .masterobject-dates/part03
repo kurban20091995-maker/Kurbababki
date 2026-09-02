@@ -1,0 +1,137 @@
+{ it.project }, settings.workDays, LocalDate.now(), 0)
+-                val today = LocalDate.now()
++                val schedule = Scheduler.calculate(projects.map { it.project }, settings.workDays, BusinessTime.today(), 0)
++                val today = BusinessTime.today()
+                 createChannel(appContext)
+                 schedule.items.forEach { item ->
+                     val days = Duration.between(today.atStartOfDay(), item.startDate.atStartOfDay()).toDays().toInt()
+diff -ruN WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoStorage.kt MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoStorage.kt
+--- WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoStorage.kt	2026-08-30 21:29:11.784816267 +0000
++++ MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/PhotoStorage.kt	2026-08-30 21:26:18.115060804 +0000
+@@ -45,7 +45,7 @@
+         if (uri.scheme == "file") runCatching { File(requireNotNull(uri.path)).delete() }
+     }
+ 
+-    private fun timestamp(): String = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
++    private fun timestamp(): String = BusinessTime.localDateTime().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+ 
+     private fun extensionFrom(name: String, mime: String?): String {
+         val fromName = name.substringAfterLast('.', "").lowercase().takeIf { it in setOf("jpg", "jpeg", "png", "webp", "heic", "heif") }
+diff -ruN WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Repository.kt MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Repository.kt
+--- WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Repository.kt	2026-08-30 21:29:11.784932361 +0000
++++ MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Repository.kt	2026-08-30 21:26:18.114917228 +0000
+@@ -58,7 +58,7 @@
+         settings: AppSettings = getSettings(),
+     ): FinanceStats {
+         val db = dbh.readableDatabase
+-        val today = LocalDate.now()
++        val today = BusinessTime.today()
+         val weekStart = today.minusDays((today.dayOfWeek.value - 1).toLong())
+         val monthStart = today.withDayOfMonth(1)
+         val yearStart = today.withDayOfYear(1)
+@@ -145,7 +145,7 @@
+             if (project.actualStart == null) putNull("actual_start") else put("actual_start", project.actualStart.toString())
+             if (project.actualStartHalf == null) putNull("actual_start_half") else put("actual_start_half", project.actualStartHalf.coerceIn(0, 1))
+             if (project.actualFinish == null) putNull("actual_finish") else put("actual_finish", project.actualFinish.toString())
+-            put("updated_at", java.time.LocalDateTime.now().toString())
++            put("updated_at", BusinessTime.localDateTime().toString())
+         }
+         return if (project.id == 0L) db.insertOrThrow("projects", null, cv) else {
+             db.update("projects", cv, "id=?", arrayOf(project.id.toString())); project.id
+@@ -163,7 +163,7 @@
+     fun startProject(id: Long) {
+         val cv = ContentValues().apply {
+             put("status", ProjectStatus.IN_PROGRESS.name)
+-            put("actual_start", LocalDate.now().toString())
++            put("actual_start", BusinessTime.today().toString())
+             put("actual_start_half", Scheduler.currentHalfForActualStart())
+         }
+         dbh.writableDatabase.update("projects", cv, "id=?", arrayOf(id.toString()))
+@@ -172,7 +172,7 @@
+     fun completeProject(id: Long, finalBasePriceCents: Long? = null) {
+         val cv = ContentValues().apply {
+             put("status", ProjectStatus.COMPLETED.name)
+-            put("actual_finish", LocalDate.now().toString())
++            put("actual_finish", BusinessTime.today().toString())
+             finalBasePriceCents?.let { put("base_price_cents", it.coerceAtLeast(0)) }
+         }
+         dbh.writableDatabase.update("projects", cv, "id=?", arrayOf(id.toString()))
+@@ -184,13 +184,13 @@
+         try {
+             val cv = ContentValues().apply {
+                 put("status", ProjectStatus.COMPLETED.name)
+-                put("actual_finish", LocalDate.now().toString())
++                put("actual_finish", BusinessTime.today().toString())
+                 finalBasePriceCents?.let { put("base_price_cents", it.coerceAtLeast(0)) }
+             }
+             db.update("projects", cv, "id=?", arrayOf(id.toString()))
+             if (paymentCents > 0) {
+                 val pay = ContentValues().apply {
+-                    put("project_id", id); put("amount_cents", paymentCents); put("date", LocalDate.now().toString());
++                    put("project_id", id); put("amount_cents", paymentCents); put("date", BusinessTime.today().toString());
+                     put("method", method.name); put("comment", comment.trim())
+                 }
+                 db.insertOrThrow("payments", null, pay)
+@@ -201,13 +201,13 @@
+ 
+     fun addPayment(projectId: Long, amountCents: Long, method: PaymentMethod, comment: String) {
+         require(amountCents > 0)
+-        val cv = ContentValues().apply { put("project_id", projectId); put("amount_cents", amountCents); put("date", LocalDate.now().toString()); put("method", method.name); put("comment", comment.trim()) }
++        val cv = ContentValues().apply { put("project_id", projectId); put("amount_cents", amountCents); put("date", BusinessTime.today().toString()); put("method", method.name); put("comment", comment.trim()) }
+         dbh.writableDatabase.insertOrThrow("payments", null, cv)
+     }
+ 
+     fun addExpense(projectId: Long, amountCents: Long, category: String, comment: String) {
+         require(amountCents > 0)
+-        val cv = ContentValues().apply { put("project_id", projectId); put("amount_cents", amountCents); put("date", LocalDate.now().toString()); put("category", category.ifBlank { "Прочее" }); put("comment", comment.trim()) }
++        val cv = ContentValues().apply { put("project_id", projectId); put("amount_cents", amountCents); put("date", BusinessTime.today().toString()); put("category", category.ifBlank { "Прочее" }); put("comment", comment.trim()) }
+         dbh.writableDatabase.insertOrThrow("expenses", null, cv)
+     }
+ 
+@@ -236,7 +236,7 @@
+         val db = dbh.writableDatabase
+         db.beginTransaction()
+         try {
+-            val createdAt = java.time.LocalDateTime.now().toString()
++            val createdAt = BusinessTime.localDateTime().toString()
+             attachments.forEach { item ->
+                 val cv = ContentValues().apply {
+                     put("project_id", projectId)
+@@ -282,7 +282,7 @@
+     }
+ 
+     fun exportJson(): String {
+-        val root = JSONObject().put("version", 3).put("exportedAt", java.time.LocalDateTime.now().toString())
++        val root = JSONObject().put("version", 3).put("exportedAt", BusinessTime.localDateTime().toString())
+         val db = dbh.readableDatabase
+         listOf("projects","extras","payments","expenses","checklist","attachments","settings").forEach { table ->
+             val arr = JSONArray()
+@@ -338,7 +338,7 @@
+ 
+     fun seedDemo() {
+         if (listProjects().isNotEmpty()) return
+-        val today = LocalDate.now()
++        val today = BusinessTime.today()
+         listOf(
+             Project(title="Кухня Магомед", clientName="Магомед", phone="+7 900 000-00-01", furnitureType=FurnitureType.KITCHEN, basePriceCents=4500000, plannedStart=today.plusDays(1), durationHalfDays=4, queuePosition=1),
+             Project(title="Кухня Ахмед", clientName="Ахмед", phone="+7 900 000-00-02", furnitureType=FurnitureType.KITCHEN, basePriceCents=6000000, durationHalfDays=6, queuePosition=2),
+diff -ruN WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Scheduler.kt MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Scheduler.kt
+--- WorkflowAuditBase/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Scheduler.kt	2026-08-30 21:29:11.785121916 +0000
++++ MasterObjectAuditSrc/FurnitureInstallerCRM-Android/app/src/main/java/ru/furniturecrm/app/Scheduler.kt	2026-08-30 21:26:01.568679457 +0000
+@@ -6,19 +6,20 @@
+ import java.time.temporal.ChronoUnit
+ 
+ object Scheduler {
+-    private data class Slot(val date: LocalDate, val half: Int)
++    private data class Slot(val date: LocalDate, val half: Int) : Comparable<Slot> {
++        override fun compareTo(other: Slot): Int {
++            val dateCmp = date.compareTo(other.date)
++            return if (dateCmp != 0) dateCmp else half.compareTo(other.half)
++        }
++    }
+ 
+     private val afternoonStartsAt: LocalTime = LocalTime.of(13, 0)
+     private val workDayEndsAt: LocalTime = LocalTime.of(19, 0)
+ 
+-    /**
+-     * Startin
