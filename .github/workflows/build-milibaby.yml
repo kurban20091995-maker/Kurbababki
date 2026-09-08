@@ -1,0 +1,41 @@
+name: Build Mili Baby APK
+on:
+  push:
+    branches: [ "milibaby-app" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore MainActivity source
+        run: |
+          mkdir -p MiliBaby/app/src/main/java/com/milibaby/app
+          cat MiliBaby/.buildsrc/mainactivity.part.* | base64 -d | gzip -d > MiliBaby/app/src/main/java/com/milibaby/app/MainActivity.kt
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Unit tests
+        working-directory: MiliBaby
+        run: gradle testDebugUnitTest --stacktrace
+      - name: Lint
+        working-directory: MiliBaby
+        run: gradle lintDebug --stacktrace
+      - name: Build APK
+        working-directory: MiliBaby
+        run: gradle assembleDebug --stacktrace
+      - name: Prepare APK
+        run: cp MiliBaby/app/build/outputs/apk/debug/app-debug.apk MiliBaby.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MiliBaby-APK
+          path: MiliBaby.apk
+          if-no-files-found: error

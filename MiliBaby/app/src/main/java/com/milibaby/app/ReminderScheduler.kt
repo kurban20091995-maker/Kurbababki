@@ -12,7 +12,7 @@ object ReminderScheduler {
     private const val REQ_LOG=402
     fun reschedule(context:Context){
         val db=DatabaseHelper(context)
-        cancel(context,REQ_FEED,ACTION_FEED); cancel(context,REQ_LOG,ACTION_LOG)
+        cancel(context,REQ_FEED,ACTION_FEED)
         if(db.getSetting("feedReminder","0")!="1") return
         val trigger = if(db.getSetting("reminderMode","interval")=="fixed") nextFixed(db.getSetting("fixedTimes")) else {
             val base=db.lastFeeding()?.timeMillis ?: System.currentTimeMillis()
