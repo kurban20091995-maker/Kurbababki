@@ -22,6 +22,7 @@ jobs:
           tar -xzf /tmp/milibaby.tar.gz -C milibaby-workdir
           test -f milibaby-workdir/settings.gradle
           test -f milibaby-workdir/app/build.gradle
+          sed -i 's/setMinimumHeight(dp(220));/setMinimumHeight((int) dp(220));/' milibaby-workdir/app/src/main/java/com/milibaby/app/FeedingChartView.java
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
