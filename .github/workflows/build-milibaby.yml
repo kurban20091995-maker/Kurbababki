@@ -16,7 +16,9 @@ jobs:
       - name: Decode project
         run: |
           mkdir -p milibaby-workdir
-          base64 --decode --ignore-garbage milibaby_project.b64 > /tmp/milibaby.tar.gz
+          cat milibaby_chunks/*.b64 > /tmp/milibaby.b64
+          test "$(wc -c < /tmp/milibaby.b64)" -eq 30508
+          base64 --decode /tmp/milibaby.b64 > /tmp/milibaby.tar.gz
           tar -xzf /tmp/milibaby.tar.gz -C milibaby-workdir
           test -f milibaby-workdir/settings.gradle
           test -f milibaby-workdir/app/build.gradle
