@@ -1,0 +1,60 @@
+name: Build MiliBaby APK
+
+on:
+  push:
+    branches: [ "milbaby-apk" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decode project
+        run: |
+          mkdir -p milibaby-workdir
+          base64 -d milibaby_project.b64 > /tmp/milibaby.tar.gz
+          tar -xzf /tmp/milibaby.tar.gz -C milibaby-workdir
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Install Android SDK components
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Unit tests, lint and APK build
+        working-directory: milibaby-workdir
+        run: gradle clean testDebugUnitTest lintDebug assembleDebug
+
+      - name: Prepare deliverables
+        run: |
+          cp milibaby-workdir/app/build/outputs/apk/debug/app-debug.apk MiliBaby.apk
+          cd milibaby-workdir
+          zip -qr ../MiliBabyProject.zip . -x "app/build/*" -x ".gradle/*"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiliBaby-APK
+          path: MiliBaby.apk
+          if-no-files-found: error
+
+      - name: Upload source project
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiliBaby-Project
+          path: MiliBabyProject.zip
+          if-no-files-found: error
