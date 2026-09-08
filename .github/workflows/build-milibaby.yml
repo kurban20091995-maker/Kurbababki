@@ -16,8 +16,10 @@ jobs:
       - name: Decode project
         run: |
           mkdir -p milibaby-workdir
-          base64 -d milibaby_project.b64 > /tmp/milibaby.tar.gz
+          base64 --decode --ignore-garbage milibaby_project.b64 > /tmp/milibaby.tar.gz
           tar -xzf /tmp/milibaby.tar.gz -C milibaby-workdir
+          test -f milibaby-workdir/settings.gradle
+          test -f milibaby-workdir/app/build.gradle
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
