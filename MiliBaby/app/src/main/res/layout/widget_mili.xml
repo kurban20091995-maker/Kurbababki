@@ -1,1 +1,144 @@
-<?xml version="1.0" encoding="utf-8"?><LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center_vertical" android:padding="16dp" android:background="@drawable/widget_bg"><TextView android:id="@+id/widgetTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Mili Baby" android:textStyle="bold" android:textSize="17sp" android:textColor="#3C3440"/><TextView android:id="@+id/widgetToday" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Сегодня: 0 мл" android:textSize="15sp" android:textColor="#3C3440"/><TextView android:id="@+id/widgetLast" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="Последнее: —" android:textSize="13sp" android:textColor="#756B78"/><TextView android:id="@+id/widgetAdd" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="9dp" android:text="＋ Кормление" android:textStyle="bold" android:textColor="#C85D84"/></LinearLayout>
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center_vertical"
+    android:padding="14dp"
+    android:background="@drawable/widget_bg">
+
+    <TextView
+        android:id="@+id/widgetTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Mili Baby"
+        android:textStyle="bold"
+        android:textSize="18sp"
+        android:textColor="#4A3D44" />
+
+    <TextView
+        android:id="@+id/widgetToday"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:text="0 мл сегодня"
+        android:textStyle="bold"
+        android:textSize="22sp"
+        android:textColor="#4A3D44" />
+
+    <TextView
+        android:id="@+id/widgetLast"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:text="Последнее: —"
+        android:textSize="13sp"
+        android:textColor="#7A6B73" />
+
+    <TextView
+        android:id="@+id/widgetStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:text="✓ 120 мл добавлено"
+        android:textStyle="bold"
+        android:textSize="12sp"
+        android:textColor="#B85F80"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/widgetAdd"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginTop="8dp"
+        android:gravity="center"
+        android:text="＋ Кормление"
+        android:textStyle="bold"
+        android:textSize="15sp"
+        android:textColor="#B75D7E"
+        android:background="@drawable/widget_chip" />
+
+    <LinearLayout
+        android:id="@+id/widgetQuickArea"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Быстро добавить"
+            android:textSize="12sp"
+            android:textColor="#7A6B73" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/widgetQ1"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="3dp"
+                android:gravity="center"
+                android:text="+30"
+                android:textStyle="bold"
+                android:textColor="#B75D7E"
+                android:background="@drawable/widget_chip" />
+
+            <TextView
+                android:id="@+id/widgetQ2"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginStart="3dp"
+                android:layout_marginEnd="3dp"
+                android:gravity="center"
+                android:text="+60"
+                android:textStyle="bold"
+                android:textColor="#B75D7E"
+                android:background="@drawable/widget_chip" />
+
+            <TextView
+                android:id="@+id/widgetQ3"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginStart="3dp"
+                android:layout_marginEnd="3dp"
+                android:gravity="center"
+                android:text="+90"
+                android:textStyle="bold"
+                android:textColor="#B75D7E"
+                android:background="@drawable/widget_chip" />
+
+            <TextView
+                android:id="@+id/widgetQ4"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginStart="3dp"
+                android:gravity="center"
+                android:text="+120"
+                android:textStyle="bold"
+                android:textColor="#B75D7E"
+                android:background="@drawable/widget_chip" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/widgetOther"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:text="Другое количество"
+            android:textStyle="bold"
+            android:textSize="13sp"
+            android:textColor="#6F6268"
+            android:background="@drawable/widget_chip_secondary" />
+    </LinearLayout>
+</LinearLayout>
